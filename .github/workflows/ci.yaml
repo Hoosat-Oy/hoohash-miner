@@ -126,11 +126,11 @@ jobs:
           command: test
           args: -p hoohash-miner --no-default-features --features=shuttle
 
-      - name: Run cargo test for kaspaopencl
+      - name: Run cargo test for hoohashopencl
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: -p kaspaopencl
+          args: -p hoohashopencl
 
   test-release:
     name: Test Suite Release
@@ -214,11 +214,11 @@ jobs:
           command: test
           args: --no-default-features --features=shuttle --release -p hoohash-miner
 
-      - name: Run cargo test for kaspaopencl
+      - name: Run cargo test for hoohashopencl
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --release -p kaspaopencl
+          args: --release -p hoohashopencl
 
   lints:
     name: Lints

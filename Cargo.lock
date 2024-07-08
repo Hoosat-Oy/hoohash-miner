@@ -696,6 +696,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "hoohashcuda"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "cust",
+ "env_logger",
+ "hoohash-miner",
+ "log",
+ "nvml-wrapper",
+ "rand 0.8.4",
+]
+
+[[package]]
+name = "hoohashopencl"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "env_logger",
+ "hoohash-miner",
+ "include_dir",
+ "log",
+ "opencl3",
+ "rand 0.8.4",
+]
+
+[[package]]
 name = "http"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -832,32 +858,6 @@ name = "itoa"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aab8fc367588b89dcee83ab0fd66b72b50b72fa1904d7095045ace2b0c81c35"
-
-[[package]]
-name = "kaspacuda"
-version = "0.1.0"
-dependencies = [
- "clap",
- "cust",
- "env_logger",
- "hoohash-miner",
- "log",
- "nvml-wrapper",
- "rand 0.8.4",
-]
-
-[[package]]
-name = "kaspaopencl"
-version = "0.1.0"
-dependencies = [
- "clap",
- "env_logger",
- "hoohash-miner",
- "include_dir",
- "log",
- "opencl3",
- "rand 0.8.4",
-]
 
 [[package]]
 name = "keccak"

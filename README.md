@@ -1,6 +1,6 @@
 # hoohash-miner
 
-This is a modification of Kaspa Rust Miner for the hoohash network
+This is a modification of Hoohash Rust Miner for the hoohash network
 please consider donate to the original dev :
 **Elichai**: `kaspa:qzvqtx5gkvl3tc54up6r8pk5mhuft9rtr0lvn624w9mtv4eqm9rvc9zfdmmpu`
 **HauntedCook**: `kaspa:qz4jdyu04hv4hpyy00pl6trzw4gllnhnwy62xattejv2vaj5r0p5quvns058f`
@@ -15,7 +15,7 @@ packages in the workspace. To compile a specific package, you run the following 
 ```sh
 git clone https://github.com/Hoosat-Oy/hoohash-miner
 cd hoohash-miner
-cargo build --release -p hoohash-miner -p kaspacuda -p kaspaopencl
+cargo build --release -p hoohash-miner -p hoohashcuda -p hoohashopencl
 ```
 
 And, the miner (and plugins) will be in `targets/release`. You can replace the last line with
@@ -32,8 +32,8 @@ The [release page](https://github.com/tmrlvi/hoohash-miner/releases) includes pr
 
 To remove a plugin, you simply remove the corresponding `dll`/`so` for the directory of the miner.
 
-- `libkaspacuda.so`, `libkaspacuda.dll`: Cuda support for hoohash-miner
-- `libkaspaopencl.so`, `libkaspaopencl.dll`: OpenCL support for hoohash-miner
+- `libhoohashcuda.so`, `libhoohashcuda.dll`: Cuda support for hoohash-miner
+- `libhoohashopencl.so`, `libhoohashopencl.dll`: OpenCL support for hoohash-miner
 
 # Usage
 
@@ -44,13 +44,13 @@ Help:
 
 ```
 hoohash-miner
-A Kaspa high performance CPU miner
+A Hoohash high performance CPU/GPU miner
 
 USAGE:
     hoohash-miner [OPTIONS] --mining-address <MINING_ADDRESS>
 
 OPTIONS:
-    -a, --mining-address <MINING_ADDRESS>                  The Kaspa address for the miner reward
+    -a, --mining-address <MINING_ADDRESS>                  The Hoosat address for the miner reward
         --cuda-device <CUDA_DEVICE>                        Which CUDA GPUs to use [default: all]
         --cuda-disable                                     Disable cuda workers
         --cuda-lock-core-clocks <CUDA_LOCK_CORE_CLOCKS>    Lock core clocks eg: ,1200, [default: 0]
@@ -86,14 +86,14 @@ This will run the miner on all the available GPU devcies.
 
 # Devfund
 
-The devfund is a fund managed by the Kaspa community in order to fund Kaspa development <br>
+The devfund is a fund managed by the Hoosat community in order to fund Hoosat development <br>
 A miner that wants to mine higher percentage into the dev-fund can pass the following flags: <br>
 `--devfund-precent=XX.YY` to mine only XX.YY% of the blocks into the devfund.
 
 **This version automatically sets the devfund donation to the community designated address.
 Due to community decision, the minimum amount in the precompiled binaries is 2%**
 
-# Donation Addresses
+# Donation Addresses for original developers.
 
 **Elichai**: `kaspa:qzvqtx5gkvl3tc54up6r8pk5mhuft9rtr0lvn624w9mtv4eqm9rvc9zfdmmpu`
 

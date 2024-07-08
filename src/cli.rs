@@ -8,7 +8,7 @@ use crate::Error;
 pub struct Opt {
     #[clap(short, long, help = "Enable debug logging level")]
     pub debug: bool,
-    #[clap(short = 'a', long = "mining-address", help = "The Kaspa address for the miner reward")]
+    #[clap(short = 'a', long = "mining-address", help = "The HTN address for the miner reward")]
     pub mining_address: String,
     #[clap(short = 's', long = "htnd-address", default_value = "127.0.0.1", help = "The IP of the HTND instance")]
     pub htnd_address: String,

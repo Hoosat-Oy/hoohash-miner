@@ -13,11 +13,11 @@ use std::sync::{Arc, Weak};
 
 static BPS: f32 = 1.;
 
-static PTX_86: &str = include_str!("../resources/kaspa-cuda-sm86.ptx");
-static PTX_75: &str = include_str!("../resources/kaspa-cuda-sm75.ptx");
-static PTX_61: &str = include_str!("../resources/kaspa-cuda-sm61.ptx");
-static PTX_30: &str = include_str!("../resources/kaspa-cuda-sm30.ptx");
-static PTX_20: &str = include_str!("../resources/kaspa-cuda-sm20.ptx");
+static PTX_86: &str = include_str!("../resources/hoohash-cuda-sm86.ptx");
+static PTX_75: &str = include_str!("../resources/hoohash-cuda-sm75.ptx");
+static PTX_61: &str = include_str!("../resources/hoohash-cuda-sm61.ptx");
+static PTX_30: &str = include_str!("../resources/hoohash-cuda-sm30.ptx");
+static PTX_20: &str = include_str!("../resources/hoohash-cuda-sm20.ptx");
 
 pub struct Kernel<'kernel> {
     func: Arc<Function<'kernel>>,
