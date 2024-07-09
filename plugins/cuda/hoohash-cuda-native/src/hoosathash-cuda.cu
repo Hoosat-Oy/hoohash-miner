@@ -1,9 +1,60 @@
-#include<stdint.h>
+#include <stdint.h>
 #include <assert.h>
 #include "keccak-tiny.c"
 #include "xoshiro256starstar.c"
 
+/* Complex Non-linear equations */
+#define M_PI 3.14159265358979323846f
 
+float MediumComplexNonLinear(float x) {
+    return exp(sin(x) + cos(x));
+}
+
+float IntermediateComplexNonLinear(float x) {
+    if (x == M_PI/2 || x == 3*M_PI/2) {
+        return 0.0f; // Avoid singularity
+    }
+    return sin(x) * cos(x) * tan(x);
+}
+
+float HighComplexNonLinear(float x) {
+    return exp(x) * log(x + 1);
+}
+
+float ComplexNonLinear(float x) {
+    float transformFactor = fmod(x, 1.0f);
+    if (x < 1) {
+        if (transformFactor < 0.25f) {
+            return MediumComplexNonLinear(x + (1 + transformFactor));
+        } else if (transformFactor < 0.5f) {
+            return MediumComplexNonLinear(x - (1 + transformFactor));
+        } else if (transformFactor < 0.75f) {
+            return MediumComplexNonLinear(x * (1 + transformFactor));
+        } else {
+            return MediumComplexNonLinear(x / (1 + transformFactor));
+        }
+    } else if (x < 10) {
+        if (transformFactor < 0.25f) {
+            return IntermediateComplexNonLinear(x + (1 + transformFactor));
+        } else if (transformFactor < 0.5f) {
+            return IntermediateComplexNonLinear(x - (1 + transformFactor));
+        } else if (transformFactor < 0.75f) {
+            return IntermediateComplexNonLinear(x * (1 + transformFactor));
+        } else {
+            return IntermediateComplexNonLinear(x / (1 + transformFactor));
+        }
+    } else {
+        if (transformFactor < 0.25f) {
+            return HighComplexNonLinear(x + (1 + transformFactor));
+        } else if (transformFactor < 0.5f) {
+            return HighComplexNonLinear(x - (1 + transformFactor));
+        } else if (transformFactor < 0.75f) {
+            return HighComplexNonLinear(x * (1 + transformFactor));
+        } else {
+            return HighComplexNonLinear(x / (1 + transformFactor));
+        }
+    }
+}
 
 typedef uint8_t Hash[32];
 
@@ -32,29 +83,20 @@ __constant__ static const uint8_t heavyP[Plen] = { 0x09, 0x85, 0x24, 0xb2, 0x52,
 __device__ __inline__ void amul4bit(uint32_t packed_vec1[32], uint32_t packed_vec2[32], uint32_t *ret) {
     // We assume each 32 bits have four values: A0 B0 C0 D0
     unsigned int res = 0;
-    #if __CUDA_ARCH__ < 610
-    char4 *a4 = (char4*)packed_vec1;
-    char4 *b4 = (char4*)packed_vec2;
-    #endif
+    float *a4 = (float*)packed_vec1;
+    float *b4 = (float*)packed_vec2;
     #pragma unroll
     for (int i=0; i<QUARTER_MATRIX_SIZE; i++) {
-        #if __CUDA_ARCH__ >= 610
-        res = __dp4a(packed_vec1[i], packed_vec2[i], res);
-        #else
-        res += a4[i].x*b4[i].x;
-        res += a4[i].y*b4[i].y;
-        res += a4[i].z*b4[i].z;
-        res += a4[i].w*b4[i].w;
-        #endif
+        res += ComplexNonLinear(a4[i].x)*ComplexNonLinear(b4[i].x);
+        res += ComplexNonLinear(a4[i].y)*ComplexNonLinear(b4[i].y);
+        res += ComplexNonLinear(a4[i].z)*ComplexNonLinear(b4[i].z);
+        res += ComplexNonLinear(a4[i].w)*ComplexNonLinear(b4[i].w);
     }
-
     *ret = res;
 }
 
 
 extern "C" {
-
-
     __global__ void heavy_hash(const uint64_t nonce_mask, const uint64_t nonce_fixed, const uint64_t nonces_len, uint8_t random_type, void* states, uint64_t *final_nonce) {
         // assuming header_len is 72
         int nonceId = threadIdx.x + blockIdx.x*blockDim.x;
@@ -78,7 +120,7 @@ extern "C" {
             // TODO: check endianity?
             uint256_t hash_;
             memcpy(input +  HASH_HEADER_SIZE, (uint8_t *)(&nonce), 8);
-            hashB3(powP, hash_.hash, input);
+            blake3_hash(powP, hash_.hash, input);
 
             //assert((rowId != 0) || (hashId != 0) );
             uchar4 packed_hash[QUARTER_MATRIX_SIZE] = {0};
@@ -91,12 +133,12 @@ extern "C" {
                     (hash_.hash[2*i+1] & 0x0F)
                 );
             }
-            uint32_t product1, product2;
+            float product1, product2;
             #pragma unroll
             for (int rowId=0; rowId<HALF_MATRIX_SIZE; rowId++){
 
-                amul4bit((uint32_t *)(matrix[(2*rowId)]), (uint32_t *)(packed_hash), &product1);
-                amul4bit((uint32_t *)(matrix[(2*rowId+1)]), (uint32_t *)(packed_hash), &product2);
+                amul4bit((float *)(matrix[(2*rowId)]), (float *)(packed_hash), &product1);
+                amul4bit((float *)(matrix[(2*rowId+1)]), (float *)(packed_hash), &product2);
                 product1 >>= 6;
                 product1 &= 0xF0;
                 product2 >>= 10;
@@ -110,11 +152,10 @@ extern "C" {
             }
             memset(input, 0, 80);
             memcpy(input, hash_.hash, 32);
-            hash(heavyP, hash_.hash, input);
+            blake3_hash(heavyP, hash_.hash, input);
             if (LT_U256(hash_, target)){
                 atomicCAS((unsigned long long int*) final_nonce, 0, (unsigned long long int) nonce);
             }
         }
     }
-
 }

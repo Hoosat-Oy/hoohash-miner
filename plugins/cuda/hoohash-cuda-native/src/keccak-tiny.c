@@ -87,7 +87,7 @@ __device__ static inline void keccakf(void* state) {
 
 
 /** The sponge-based hash construction. **/
-__device__ __forceinline__ static void hash(
+__device__ __forceinline__ static void keccak_hash(
                        const uint8_t initP[Plen],
                        uint8_t* out,
                        const uint8_t* in) {
@@ -107,7 +107,7 @@ __device__ __forceinline__ static void hash(
 }
 
 /** The sponge-based hash construction. **/
-__device__ __forceinline__ static void hashB3(
+__device__ __forceinline__ static void blake3_hash(
                       const uint8_t initP[Plen],
                        uint8_t* out,
                        const uint8_t* in) {
