@@ -5,9 +5,9 @@
 #include "blake3.h" // Ensure you have a CUDA-compatible Blake3 implementation
 
 #define M_PI 3.14159265358979323846f
-#define MATRIX_SIZE 128
-#define HALF_MATRIX_SIZE 64
-#define QUARTER_MATRIX_SIZE 32
+#define MATRIX_SIZE 64
+#define HALF_MATRIX_SIZE 32
+#define QUARTER_MATRIX_SIZE 16
 #define HASH_SIZE 32
 #define HASH_HEADER_SIZE 72
 #define BLOCKDIM 1024
