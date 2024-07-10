@@ -2,70 +2,59 @@
 #include <assert.h>
 #include "keccak-tiny.c"
 #include "xoshiro256starstar.c"
-#include "blake3.h" // Make sure you have the CUDA-compatible Blake3 implementation
+#include "blake3.h" // Ensure you have a CUDA-compatible Blake3 implementation
 
 #define M_PI 3.14159265358979323846f
 #define MATRIX_SIZE 128
+#define HALF_MATRIX_SIZE 64
+#define QUARTER_MATRIX_SIZE 32
 #define HASH_SIZE 32
-#define BLOCKDIM 256
+#define HASH_HEADER_SIZE 72
+#define BLOCKDIM 1024
+
+#define RANDOM_LEAN 0
+#define RANDOM_XOSHIRO 1
 
 __constant__ uint16_t matrix[MATRIX_SIZE][MATRIX_SIZE];
-__constant__ uint8_t hash_header[72];
+__constant__ uint8_t hash_header[HASH_HEADER_SIZE];
 __constant__ uint256_t target;
-
-__device__ float MediumComplexNonLinear(float x) {
-    return expf(sinf(x) + cosf(x));
-}
-
-__device__ float IntermediateComplexNonLinear(float x) {
-    if (x == M_PI/2 || x == 3*M_PI/2) {
-        return 0.0f;
-    }
-    return sinf(x) * cosf(x) * tanf(x);
-}
-
-__device__ float HighComplexNonLinear(float x) {
-    return expf(x) * logf(x + 1);
-}
 
 __device__ float ComplexNonLinear(float x) {
     float transformFactor = fmodf(x, 1.0f);
     if (x < 1) {
-        if (transformFactor < 0.25f) {
-            return MediumComplexNonLinear(x + (1 + transformFactor));
-        } else if (transformFactor < 0.5f) {
-            return MediumComplexNonLinear(x - (1 + transformFactor));
-        } else if (transformFactor < 0.75f) {
-            return MediumComplexNonLinear(x * (1 + transformFactor));
-        } else {
-            return MediumComplexNonLinear(x / (1 + transformFactor));
-        }
+        if (transformFactor < 0.25f)
+            return expf(sinf(x + (1 + transformFactor)) + cosf(x + (1 + transformFactor)));
+        else if (transformFactor < 0.5f)
+            return expf(sinf(x - (1 + transformFactor)) + cosf(x - (1 + transformFactor)));
+        else if (transformFactor < 0.75f)
+            return expf(sinf(x * (1 + transformFactor)) + cosf(x * (1 + transformFactor)));
+        else
+            return expf(sinf(x / (1 + transformFactor)) + cosf(x / (1 + transformFactor)));
     } else if (x < 10) {
-        if (transformFactor < 0.25f) {
-            return IntermediateComplexNonLinear(x + (1 + transformFactor));
-        } else if (transformFactor < 0.5f) {
-            return IntermediateComplexNonLinear(x - (1 + transformFactor));
-        } else if (transformFactor < 0.75f) {
-            return IntermediateComplexNonLinear(x * (1 + transformFactor));
-        } else {
-            return IntermediateComplexNonLinear(x / (1 + transformFactor));
-        }
+        if (x == M_PI/2 || x == 3*M_PI/2) return 0.0f;
+        if (transformFactor < 0.25f)
+            return sinf(x + (1 + transformFactor)) * cosf(x + (1 + transformFactor)) * tanf(x + (1 + transformFactor));
+        else if (transformFactor < 0.5f)
+            return sinf(x - (1 + transformFactor)) * cosf(x - (1 + transformFactor)) * tanf(x - (1 + transformFactor));
+        else if (transformFactor < 0.75f)
+            return sinf(x * (1 + transformFactor)) * cosf(x * (1 + transformFactor)) * tanf(x * (1 + transformFactor));
+        else
+            return sinf(x / (1 + transformFactor)) * cosf(x / (1 + transformFactor)) * tanf(x / (1 + transformFactor));
     } else {
-        if (transformFactor < 0.25f) {
-            return HighComplexNonLinear(x + (1 + transformFactor));
-        } else if (transformFactor < 0.5f) {
-            return HighComplexNonLinear(x - (1 + transformFactor));
-        } else if (transformFactor < 0.75f) {
-            return HighComplexNonLinear(x * (1 + transformFactor));
-        } else {
-            return HighComplexNonLinear(x / (1 + transformFactor));
-        }
+        if (transformFactor < 0.25f)
+            return expf(x + (1 + transformFactor)) * logf(x + (1 + transformFactor) + 1);
+        else if (transformFactor < 0.5f)
+            return expf(x - (1 + transformFactor)) * logf(x - (1 + transformFactor) + 1);
+        else if (transformFactor < 0.75f)
+            return expf(x * (1 + transformFactor)) * logf(x * (1 + transformFactor) + 1);
+        else
+            return expf(x / (1 + transformFactor)) * logf(x / (1 + transformFactor) + 1);
     }
 }
 
-__device__ void matrixMultiplication(const uint16_t mat[MATRIX_SIZE][MATRIX_SIZE], const uint8_t* hash, uint8_t* result) {
+__device__ void matrixMultiplication(const uint8_t* hash, uint8_t* result) {
     float vector[MATRIX_SIZE];
-    float product[MATRIX_SIZE] = {0};
+    float product[MATRIX_SIZE];
 
     for (int i = 0; i < HASH_SIZE; i++) {
         vector[2*i] = (float)(hash[i] >> 4);
@@ -73,9 +62,11 @@ __device__ void matrixMultiplication(const uint16_t mat[MATRIX_SIZE][MATRIX_SIZE
     }
 
     for (int i = 0; i < MATRIX_SIZE; i++) {
+        float sum = 0;
         for (int j = 0; j < MATRIX_SIZE; j++) {
-            product[i] += (float)mat[i][j] * ComplexNonLinear(vector[j]);
+            sum += (float)matrix[i][j] * ComplexNonLinear(vector[j]);
         }
+        product[i] = sum;
     }
 
     for (int i = 0; i < HASH_SIZE; i++) {
@@ -94,22 +85,31 @@ __device__ bool LT_U256(const uint256_t* a, const uint256_t* b) {
     return false;
 }
 
-__global__ void hoohash_pow(uint64_t nonce_start, uint64_t nonces_per_thread, uint64_t* final_nonce) {
-    uint64_t thread_id = blockIdx.x * blockDim.x + threadIdx.x;
-    uint64_t nonce_base = nonce_start + thread_id * nonces_per_thread;
+__global__ void heavy_hash(const uint64_t nonce_mask, const uint64_t nonce_fixed, const uint64_t nonces_len, uint8_t random_type, void* states, uint64_t *final_nonce) {
+    int nonceId = threadIdx.x + blockIdx.x * blockDim.x;
+    if (nonceId < nonces_len) {
+        if (nonceId == 0) *final_nonce = 0;
+        uint64_t nonce;
+        switch (random_type) {
+            case RANDOM_LEAN:
+                nonce = ((uint64_t *)states)[0] ^ nonceId;
+                break;
+            case RANDOM_XOSHIRO:
+            default:
+                nonce = xoshiro256_next(((ulonglong4 *)states) + nonceId);
+                break;
+        }
+        nonce = (nonce & nonce_mask) | nonce_fixed;
 
-    uint8_t input[80];
-    memcpy(input, hash_header, 72);
-
-    for (uint64_t i = 0; i < nonces_per_thread; i++) {
-        uint64_t nonce = nonce_base + i;
-        memcpy(input + 72, &nonce, 8);
+        uint8_t input[80];
+        memcpy(input, hash_header, HASH_HEADER_SIZE);
+        memcpy(input + HASH_HEADER_SIZE, (uint8_t *)(&nonce), 8);
 
         uint8_t hash[HASH_SIZE];
         blake3(input, 80, hash, HASH_SIZE);
 
         uint8_t multiplied[HASH_SIZE];
-        matrixMultiplication(matrix, hash, multiplied);
+        matrixMultiplication(hash, multiplied);
 
         blake3(multiplied, HASH_SIZE, hash, HASH_SIZE);
 
@@ -118,17 +118,10 @@ __global__ void hoohash_pow(uint64_t nonce_start, uint64_t nonces_per_thread, ui
 
         if (LT_U256(&result, &target)) {
             atomicCAS((unsigned long long int*)final_nonce, 0, (unsigned long long int)nonce);
-            return;
         }
     }
 }
 
 extern "C" {
-    void launch_hoohash_pow(uint64_t nonce_start, uint64_t total_nonces, uint64_t* final_nonce, cudaStream_t stream) {
-        uint64_t threads_per_block = BLOCKDIM;
-        uint64_t nonces_per_thread = 256;
-        uint64_t blocks = (total_nonces + threads_per_block * nonces_per_thread - 1) / (threads_per_block * nonces_per_thread);
-
-        hoohash_pow<<<blocks, threads_per_block, 0, stream>>>(nonce_start, nonces_per_thread, final_nonce);
-    }
+    __global__ void heavy_hash(const uint64_t nonce_mask, const uint64_t nonce_fixed, const uint64_t nonces_len, uint8_t random_type, void* states, uint64_t *final_nonce);
 }
