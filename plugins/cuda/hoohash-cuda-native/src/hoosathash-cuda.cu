@@ -2,27 +2,34 @@
 #include <assert.h>
 #include "keccak-tiny.c"
 #include "xoshiro256starstar.c"
+#include "blake3.h" // Make sure you have the CUDA-compatible Blake3 implementation
 
-/* Complex Non-linear equations */
 #define M_PI 3.14159265358979323846f
+#define MATRIX_SIZE 128
+#define HASH_SIZE 32
+#define BLOCKDIM 256
 
-float MediumComplexNonLinear(float x) {
-    return exp(sin(x) + cos(x));
+__constant__ uint16_t matrix[MATRIX_SIZE][MATRIX_SIZE];
+__constant__ uint8_t hash_header[72];
+__constant__ uint256_t target;
+
+__device__ float MediumComplexNonLinear(float x) {
+    return expf(sinf(x) + cosf(x));
 }
 
-float IntermediateComplexNonLinear(float x) {
+__device__ float IntermediateComplexNonLinear(float x) {
     if (x == M_PI/2 || x == 3*M_PI/2) {
-        return 0.0f; // Avoid singularity
+        return 0.0f;
     }
-    return sin(x) * cos(x) * tan(x);
+    return sinf(x) * cosf(x) * tanf(x);
 }
 
-float HighComplexNonLinear(float x) {
-    return exp(x) * log(x + 1);
+__device__ float HighComplexNonLinear(float x) {
+    return expf(x) * logf(x + 1);
 }
 
-float ComplexNonLinear(float x) {
-    float transformFactor = fmod(x, 1.0f);
+__device__ float ComplexNonLinear(float x) {
+    float transformFactor = fmodf(x, 1.0f);
     if (x < 1) {
         if (transformFactor < 0.25f) {
             return MediumComplexNonLinear(x + (1 + transformFactor));
@@ -56,106 +63,72 @@ float ComplexNonLinear(float x) {
     }
 }
 
-typedef uint8_t Hash[32];
+__device__ void matrixMultiplication(const uint16_t mat[MATRIX_SIZE][MATRIX_SIZE], const uint8_t* hash, uint8_t* result) {
+    float vector[MATRIX_SIZE];
+    float product[MATRIX_SIZE] = {0};
 
-typedef union _uint256_t {
-    uint64_t number[4];
-    uint8_t hash[32];
-} uint256_t;
-
-#define BLOCKDIM 1024
-#define MATRIX_SIZE 64
-#define HALF_MATRIX_SIZE 32
-#define QUARTER_MATRIX_SIZE 16
-#define HASH_HEADER_SIZE 72
-
-#define RANDOM_LEAN 0
-#define RANDOM_XOSHIRO 1
-
-#define LT_U256(X,Y) (X.number[3] != Y.number[3] ? X.number[3] < Y.number[3] : X.number[2] != Y.number[2] ? X.number[2] < Y.number[2] : X.number[1] != Y.number[1] ? X.number[1] < Y.number[1] : X.number[0] < Y.number[0])
-
-__constant__ uint8_t matrix[MATRIX_SIZE][MATRIX_SIZE];
-__constant__ uint8_t hash_header[HASH_HEADER_SIZE];
-__constant__ uint256_t target;
-__constant__ static const uint8_t powP[Plen] = { 0x3d, 0xd8, 0xf6, 0xa1, 0x0d, 0xff, 0x3c, 0x11, 0x3c, 0x7e, 0x02, 0xb7, 0x55, 0x88, 0xbf, 0x29, 0xd2, 0x44, 0xfb, 0x0e, 0x72, 0x2e, 0x5f, 0x1e, 0xa0, 0x69, 0x98, 0xf5, 0xa3, 0xa4, 0xa5, 0x1b, 0x65, 0x2d, 0x5e, 0x87, 0xca, 0xaf, 0x2f, 0x7b, 0x46, 0xe2, 0xdc, 0x29, 0xd6, 0x61, 0xef, 0x4a, 0x10, 0x5b, 0x41, 0xad, 0x1e, 0x98, 0x3a, 0x18, 0x9c, 0xc2, 0x9b, 0x78, 0x0c, 0xf6, 0x6b, 0x77, 0x40, 0x31, 0x66, 0x88, 0x33, 0xf1, 0xeb, 0xf8, 0xf0, 0x5f, 0x28, 0x43, 0x3c, 0x1c, 0x65, 0x2e, 0x0a, 0x4a, 0xf1, 0x40, 0x05, 0x07, 0x96, 0x0f, 0x52, 0x91, 0x29, 0x5b, 0x87, 0x67, 0xe3, 0x44, 0x15, 0x37, 0xb1, 0x25, 0xa4, 0xf1, 0x70, 0xec, 0x89, 0xda, 0xe9, 0x82, 0x8f, 0x5d, 0xc8, 0xe6, 0x23, 0xb2, 0xb4, 0x85, 0x1f, 0x60, 0x1a, 0xb2, 0x46, 0x6a, 0xa3, 0x64, 0x90, 0x54, 0x85, 0x34, 0x1a, 0x85, 0x2f, 0x7a, 0x1c, 0xdd, 0x06, 0x0f, 0x42, 0xb1, 0x3b, 0x56, 0x1d, 0x02, 0xa2, 0xc1, 0xe4, 0x68, 0x16, 0x45, 0xe4, 0xe5, 0x1d, 0xba, 0x8d, 0x5f, 0x09, 0x05, 0x41, 0x57, 0x02, 0xd1, 0x4a, 0xcf, 0xce, 0x9b, 0x84, 0x4e, 0xca, 0x89, 0xdb, 0x2e, 0x74, 0xa8, 0x27, 0x94, 0xb0, 0x48, 0x72, 0x52, 0x8b, 0xe7, 0x9c, 0xce, 0xfc, 0xb1, 0xbc, 0xa5, 0xaf, 0x82, 0xcf, 0x29, 0x11, 0x5d, 0x83, 0x43, 0x82, 0x6f, 0x78, 0x7c, 0xb9, 0x02 };
-__constant__ static const uint8_t heavyP[Plen] = { 0x09, 0x85, 0x24, 0xb2, 0x52, 0x4c, 0xd7, 0x3a, 0x16, 0x42, 0x9f, 0x2f, 0x0e, 0x9b, 0x62, 0x79, 0xee, 0xf8, 0xc7, 0x16, 0x48, 0xff, 0x14, 0x7a, 0x98, 0x64, 0x05, 0x80, 0x4c, 0x5f, 0xa7, 0x11, 0xda, 0xce, 0xee, 0x44, 0xdf, 0xe0, 0x20, 0xe7, 0x69, 0x40, 0xf3, 0x14, 0x2e, 0xd8, 0xc7, 0x72, 0xba, 0x35, 0x89, 0x93, 0x2a, 0xff, 0x00, 0xc1, 0x62, 0xc4, 0x0f, 0x25, 0x40, 0x90, 0x21, 0x5e, 0x48, 0x6a, 0xcf, 0x0d, 0xa6, 0xf9, 0x39, 0x80, 0x0c, 0x3d, 0x2a, 0x79, 0x9f, 0xaa, 0xbc, 0xa0, 0x26, 0xa2, 0xa9, 0xd0, 0x5d, 0xc0, 0x31, 0xf4, 0x3f, 0x8c, 0xc1, 0x54, 0xc3, 0x4c, 0x1f, 0xd3, 0x3d, 0xcc, 0x69, 0xa7, 0x01, 0x7d, 0x6b, 0x6c, 0xe4, 0x93, 0x24, 0x56, 0xd3, 0x5b, 0xc6, 0x2e, 0x44, 0xb0, 0xcd, 0x99, 0x3a, 0x4b, 0xf7, 0x4e, 0xb0, 0xf2, 0x34, 0x54, 0x83, 0x86, 0x4c, 0x77, 0x16, 0x94, 0xbc, 0x36, 0xb0, 0x61, 0xe9, 0x07, 0x07, 0xcc, 0x65, 0x77, 0xb1, 0x1d, 0x8f, 0x7e, 0x39, 0x6d, 0xc4, 0xba, 0x80, 0xdb, 0x8f, 0xea, 0x58, 0xca, 0x34, 0x7b, 0xd3, 0xf2, 0x92, 0xb9, 0x57, 0xb9, 0x81, 0x84, 0x04, 0xc5, 0x76, 0xc7, 0x2e, 0xc2, 0x12, 0x51, 0x67, 0x9f, 0xc3, 0x47, 0x0a, 0x0c, 0x29, 0xb5, 0x9d, 0x39, 0xbb, 0x92, 0x15, 0xc6, 0x9f, 0x2f, 0x31, 0xe0, 0x9a, 0x54, 0x35, 0xda, 0xb9, 0x10, 0x7d, 0x32, 0x19, 0x16 };
-
-__device__ __inline__ void amul4bit(uint32_t packed_vec1[32], uint32_t packed_vec2[32], uint32_t *ret) {
-    // We assume each 32 bits have four values: A0 B0 C0 D0
-    unsigned int res = 0;
-    float *a4 = (float*)packed_vec1;
-    float *b4 = (float*)packed_vec2;
-    #pragma unroll
-    for (int i=0; i<QUARTER_MATRIX_SIZE; i++) {
-        res += ComplexNonLinear(a4[i].x)*ComplexNonLinear(b4[i].x);
-        res += ComplexNonLinear(a4[i].y)*ComplexNonLinear(b4[i].y);
-        res += ComplexNonLinear(a4[i].z)*ComplexNonLinear(b4[i].z);
-        res += ComplexNonLinear(a4[i].w)*ComplexNonLinear(b4[i].w);
+    for (int i = 0; i < HASH_SIZE; i++) {
+        vector[2*i] = (float)(hash[i] >> 4);
+        vector[2*i+1] = (float)(hash[i] & 0x0F);
     }
-    *ret = res;
+
+    for (int i = 0; i < MATRIX_SIZE; i++) {
+        for (int j = 0; j < MATRIX_SIZE; j++) {
+            product[i] += (float)mat[i][j] * ComplexNonLinear(vector[j]);
+        }
+    }
+
+    for (int i = 0; i < HASH_SIZE; i++) {
+        uint16_t high = (uint16_t)fmodf(product[2*i], 16);
+        uint16_t low = (uint16_t)fmodf(product[2*i+1], 16);
+        result[i] = hash[i] ^ ((high << 4) | low);
+    }
 }
 
+__device__ bool LT_U256(const uint256_t* a, const uint256_t* b) {
+    for (int i = 3; i >= 0; i--) {
+        if (a->number[i] != b->number[i]) {
+            return a->number[i] < b->number[i];
+        }
+    }
+    return false;
+}
+
+__global__ void hoohash_pow(uint64_t nonce_start, uint64_t nonces_per_thread, uint64_t* final_nonce) {
+    uint64_t thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+    uint64_t nonce_base = nonce_start + thread_id * nonces_per_thread;
+
+    uint8_t input[80];
+    memcpy(input, hash_header, 72);
+
+    for (uint64_t i = 0; i < nonces_per_thread; i++) {
+        uint64_t nonce = nonce_base + i;
+        memcpy(input + 72, &nonce, 8);
+
+        uint8_t hash[HASH_SIZE];
+        blake3(input, 80, hash, HASH_SIZE);
+
+        uint8_t multiplied[HASH_SIZE];
+        matrixMultiplication(matrix, hash, multiplied);
+
+        blake3(multiplied, HASH_SIZE, hash, HASH_SIZE);
+
+        uint256_t result;
+        memcpy(result.hash, hash, HASH_SIZE);
+
+        if (LT_U256(&result, &target)) {
+            atomicCAS((unsigned long long int*)final_nonce, 0, (unsigned long long int)nonce);
+            return;
+        }
+    }
+}
 
 extern "C" {
-    __global__ void heavy_hash(const uint64_t nonce_mask, const uint64_t nonce_fixed, const uint64_t nonces_len, uint8_t random_type, void* states, uint64_t *final_nonce) {
-        // assuming header_len is 72
-        int nonceId = threadIdx.x + blockIdx.x*blockDim.x;
-        if (nonceId < nonces_len) {
-            if (nonceId == 0) *final_nonce = 0;
-            uint64_t nonce;
-            switch (random_type) {
-                case RANDOM_LEAN:
-                    nonce = ((uint64_t *)states)[0] ^ nonceId;
-                    break;
-                case RANDOM_XOSHIRO:
-                default:
-                    nonce = xoshiro256_next(((ulonglong4 *)states) + nonceId);
-                    break;
-            }
-            nonce = (nonce & nonce_mask) | nonce_fixed;
-            // header
-            uint8_t input[80];
-            memcpy(input, hash_header, HASH_HEADER_SIZE);
-            // data
-            // TODO: check endianity?
-            uint256_t hash_;
-            memcpy(input +  HASH_HEADER_SIZE, (uint8_t *)(&nonce), 8);
-            blake3_hash(powP, hash_.hash, input);
+    void launch_hoohash_pow(uint64_t nonce_start, uint64_t total_nonces, uint64_t* final_nonce, cudaStream_t stream) {
+        uint64_t threads_per_block = BLOCKDIM;
+        uint64_t nonces_per_thread = 256;
+        uint64_t blocks = (total_nonces + threads_per_block * nonces_per_thread - 1) / (threads_per_block * nonces_per_thread);
 
-            //assert((rowId != 0) || (hashId != 0) );
-            uchar4 packed_hash[QUARTER_MATRIX_SIZE] = {0};
-            #pragma unroll
-            for (int i=0; i<QUARTER_MATRIX_SIZE; i++) {
-                packed_hash[i] = make_uchar4(
-                    (hash_.hash[2*i] & 0xF0) >> 4 ,
-                    (hash_.hash[2*i] & 0x0F),
-                    (hash_.hash[2*i+1] & 0xF0) >> 4,
-                    (hash_.hash[2*i+1] & 0x0F)
-                );
-            }
-            float product1, product2;
-            #pragma unroll
-            for (int rowId=0; rowId<HALF_MATRIX_SIZE; rowId++){
-
-                amul4bit((float *)(matrix[(2*rowId)]), (float *)(packed_hash), &product1);
-                amul4bit((float *)(matrix[(2*rowId+1)]), (float *)(packed_hash), &product2);
-                product1 >>= 6;
-                product1 &= 0xF0;
-                product2 >>= 10;
-                #if __CUDA_ARCH__ < 500 || __CUDA_ARCH__ > 700
-                hash_.hash[rowId] = hash_.hash[rowId] ^ ((uint8_t)(product1) | (uint8_t)(product2));
-                #else
-                uint32_t lop_temp = hash_.hash[rowId];
-                asm("lop3.b32" " %0, %1, %2, %3, 0x56;": "=r" (lop_temp): "r" (product1), "r" (product2), "r" (lop_temp));
-                hash_.hash[rowId] = lop_temp;
-                #endif
-            }
-            memset(input, 0, 80);
-            memcpy(input, hash_.hash, 32);
-            blake3_hash(heavyP, hash_.hash, input);
-            if (LT_U256(hash_, target)){
-                atomicCAS((unsigned long long int*) final_nonce, 0, (unsigned long long int) nonce);
-            }
-        }
+        hoohash_pow<<<blocks, threads_per_block, 0, stream>>>(nonce_start, nonces_per_thread, final_nonce);
     }
 }
