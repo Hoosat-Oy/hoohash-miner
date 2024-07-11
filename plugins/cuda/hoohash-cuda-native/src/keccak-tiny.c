@@ -108,7 +108,6 @@ __device__ __forceinline__ static void keccak_hash(
 
 /** The sponge-based hash construction. **/
 __device__ __forceinline__ static void blake3(
-                      const uint8_t initP[Plen],
                        uint8_t* out,
                        const uint8_t* in) {
 
