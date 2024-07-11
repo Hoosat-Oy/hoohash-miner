@@ -1,3 +1,7 @@
+#ifndef BLAKE3_COMPACT_H
+#define BLAKE3_COMPACT_H
+#endif
+
 #define OUT_LEN 32
 #define KEY_LEN 32
 #define BLOCK_LEN 64
