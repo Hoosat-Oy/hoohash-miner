@@ -122,7 +122,7 @@ impl<'gpu> Worker for CudaGPUWorker<'gpu> {
     fn sync(&self) -> Result<(), Error> {
         //self.stream.synchronize()?;
         self.stop_event.synchronize()?;
-        if self.stop_event.elapsed_time_f32(&self.start_event)? > 1000. / BPS {
+        if self.stop_event.elapsed_time_f32(&self.start_event)? > 10000. / BPS {
             return Err("Cuda takes longer then block rate. Please reduce your workload.".into());
         }
         Ok(())
