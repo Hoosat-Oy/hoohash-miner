@@ -107,7 +107,7 @@ __device__ __forceinline__ static void keccak_hash(
 }
 
 /** The sponge-based hash construction. **/
-__device__ __forceinline__ static void blake3_hash(
+__device__ __forceinline__ static void blake3(
                       const uint8_t initP[Plen],
                        uint8_t* out,
                        const uint8_t* in) {
@@ -116,7 +116,5 @@ __device__ __forceinline__ static void blake3_hash(
   blake3_hasher_init(&hasher);
   blake3_hasher_update(&hasher, in, 80);
   blake3_hasher_finalize(&hasher, out, BLAKE3_OUT_LEN);
-
-
 }
 
