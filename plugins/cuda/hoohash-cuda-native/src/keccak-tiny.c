@@ -7,7 +7,6 @@
  * but not liability.
  */
 #define __STDC_WANT_LIB_EXT1__ 1
-#include "blake3_compact.h"
 
 #include <stdint.h>
 #include <stdio.h>

@@ -1,6 +1,4 @@
-#ifndef BLAKE3_COMPACT_H
-#define BLAKE3_COMPACT_H
-#endif
+#pragma once
 
 #define OUT_LEN 32
 #define KEY_LEN 32

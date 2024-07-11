@@ -1,6 +1,4 @@
-#ifndef BLAKE3_COMPACT_H
-#define BLAKE3_COMPACT_H
-#endif
+#pragma once
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
