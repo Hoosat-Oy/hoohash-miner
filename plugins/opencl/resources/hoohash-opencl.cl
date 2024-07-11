@@ -147,7 +147,6 @@ __kernel void heavy_hash(const ulong nonce_mask, const ulong nonce_fixed, const 
         }
         nonce = (nonce & nonce_mask) | nonce_fixed;
 
-        uint256_t result;
         uchar input[80];
         for (int i = 0; i < HASH_HEADER_SIZE; i++) {
             input[i] = hash_header[i];
@@ -162,9 +161,9 @@ __kernel void heavy_hash(const ulong nonce_mask, const ulong nonce_fixed, const 
         uchar multiplied[HASH_SIZE];
         matrixMultiplication(matrix, hash, multiplied);
 
-        blake3(result.hash, multiplied);
+        blake3(hash, multiplied);
 
-        if (LT_U256(result, target)) {
+        if (LT_U256(hash, target)) {
             atom_cmpxchg((volatile __global ulong*)final_nonce, 0, nonce);
         }
     }

@@ -129,7 +129,6 @@ extern "C" {
             }
             nonce = (nonce & nonce_mask) | nonce_fixed;
 
-            uint256_t result;
             uint8_t input[80];
             memcpy(input, hash_header, HASH_HEADER_SIZE);
             memcpy(input + HASH_HEADER_SIZE, (uint8_t *)(&nonce), 8);
@@ -141,9 +140,8 @@ extern "C" {
             matrixMultiplication(hash, multiplied);
 
             blake3(hash, multiplied);
-            result.hash = hash;
             
-            if (LT_U256(&result, &target)) {
+            if (LT_U256(hash, &target)) {
                 atomicCAS((unsigned long long int*)final_nonce, 0, (unsigned long long int)nonce);
             }
         }
