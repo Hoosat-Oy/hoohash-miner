@@ -321,11 +321,3 @@ __device__ void hasher_finalize(const Hasher *self, uint8_t *out, size_t out_len
 
     output_root_bytes(&output, out, out_len);
 }
-
-__device__ static void blake3(uint8_t *out, const uint8_t *in)
-{
-    Hasher hasher;
-    hasher_init(&hasher, IV, 0);
-    hasher_update(&hasher, input, input_len);
-    hasher_finalize(&hasher, output, output_len);
-}

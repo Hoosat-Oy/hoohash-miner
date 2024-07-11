@@ -110,4 +110,3 @@ __device__ __forceinline__ static void keccak_hash(
     ((uint64_t *)out)[i] = ((uint64_t *)a)[i];
 }
 
-/** The sponge-based hash construction. **/

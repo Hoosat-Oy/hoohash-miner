@@ -17,6 +17,8 @@ typedef union _uint256_t {
 #define QUARTER_MATRIX_SIZE 16
 #define HASH_HEADER_SIZE 72
 #define HASH_SIZE 32
+#define BLAKE3_KEY_LEN 32
+#define BLAKE3_OUT_LEN 32
 
 #define RANDOM_LEAN 0
 #define RANDOM_XOSHIRO 1
@@ -27,6 +29,13 @@ __constant__ uint8_t matrix[MATRIX_SIZE][MATRIX_SIZE];
 __constant__ uint8_t hash_header[HASH_HEADER_SIZE];
 __constant__ uint256_t target;
 
+
+static void blake3(uchar* out, const uchar* in) {
+    Hasher hasher;
+    hasher_new(&hasher);
+    hasher_update(&hasher, in, 80);
+    hasher_finalize(&hasher, out, BLAKE3_OUT_LEN);
+}
 
 __device__ float MediumComplexNonLinear(float x) {
     return exp(sin(x) + cos(x));
