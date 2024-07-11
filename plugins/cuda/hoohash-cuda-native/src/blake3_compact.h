@@ -272,7 +272,7 @@ __device__ void hasher_new(Hasher *self)
     hasher_new_internal(self, iv_copy, 0);
 }
 
-__device__ void hasher_new_keyed(Hasher *self, const uint32_t key[KEY_LEN])
+__device__ void hasher_new_keyed(Hasher *self, const uint32_t *key)
 {
     uint key_words[8];
     words_from_little_endian_bytes(key, key_words, 8);
