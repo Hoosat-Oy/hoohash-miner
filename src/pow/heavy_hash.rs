@@ -1,9 +1,62 @@
 use crate::pow::{hasher::HeavyHasher, xoshiro::XoShiRo256PlusPlus};
 use crate::Hash;
 use std::mem::MaybeUninit;
+use std::f64::consts::PI;
 
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
 pub struct Matrix(pub [[u16; 64]; 64]);
+
+
+fn medium_complex_non_linear(x: f64) -> f64 {
+    (x.sin() + x.cos()).exp()
+}
+
+fn intermediate_complex_non_linear(x: f64) -> f64 {
+    if x == PI / 2.0 || x == 3.0 * PI / 2.0 {
+        0.0 // Avoid singularity
+    } else {
+        x.sin() * x.cos() * x.tan()
+    }
+}
+
+fn high_complex_non_linear(x: f64) -> f64 {
+    x.exp() * (x + 1.0).ln()
+}
+
+fn complex_non_linear(x: f64) -> f64 {
+    let transform_factor = x % 1.0;
+    if x < 1.0 {
+        if transform_factor < 0.25 {
+            medium_complex_non_linear(x + (1.0 + transform_factor))
+        } else if transform_factor < 0.5 {
+            medium_complex_non_linear(x - (1.0 + transform_factor))
+        } else if transform_factor < 0.75 {
+            medium_complex_non_linear(x * (1.0 + transform_factor))
+        } else {
+            medium_complex_non_linear(x / (1.0 + transform_factor))
+        }
+    } else if x < 10.0 {
+        if transform_factor < 0.25 {
+            intermediate_complex_non_linear(x + (1.0 + transform_factor))
+        } else if transform_factor < 0.5 {
+            intermediate_complex_non_linear(x - (1.0 + transform_factor))
+        } else if transform_factor < 0.75 {
+            intermediate_complex_non_linear(x * (1.0 + transform_factor))
+        } else {
+            intermediate_complex_non_linear(x / (1.0 + transform_factor))
+        }
+    } else {
+        if transform_factor < 0.25 {
+            high_complex_non_linear(x + (1.0 + transform_factor))
+        } else if transform_factor < 0.5 {
+            high_complex_non_linear(x - (1.0 + transform_factor))
+        } else if transform_factor < 0.75 {
+            high_complex_non_linear(x * (1.0 + transform_factor))
+        } else {
+            high_complex_non_linear(x / (1.0 + transform_factor))
+        }
+    }
+}
 
 impl Matrix {
     // pub fn generate(hash: Hash) -> Self {
@@ -56,7 +109,7 @@ impl Matrix {
 
         out.iter_mut().zip(self.0.iter()).for_each(|(out_row, mat_row)| {
             out_row.iter_mut().zip(mat_row).for_each(|(out_element, &element)| {
-                out_element.write(f64::from(element));
+                out_element.write(f64::from(element) + complex_non_linear(f64::from(element)));
             })
         });
         // SAFETY: The loop above wrote into all indexes.
@@ -100,28 +153,36 @@ impl Matrix {
 
     pub fn heavy_hash(&self, hash: Hash) -> Hash {
         let hash = hash.to_le_bytes();
-        // SAFETY: An uninitialized MaybrUninit is always safe.
-        let mut vec: [MaybeUninit<u8>; 64] = unsafe { MaybeUninit::uninit().assume_init() };
+    
+        // Prepare the vector based on hash bytes
+        let mut vector: [f64; 64] = [0.0; 64];
         for i in 0..32 {
-            vec[2 * i].write(hash[i] >> 4);
-            vec[2 * i + 1].write(hash[i] & 0x0F);
+            vector[2 * i] = (hash[i] >> 4) as f64;
+            vector[2 * i + 1] = (hash[i] & 0x0F) as f64;
         }
-        // SAFETY: The loop above wrote into all indexes.
-        let vec: [u8; 64] = unsafe { std::mem::transmute(vec) };
-
-        // Matrix-vector multiplication, convert to 4 bits, and then combine back to 8 bits.
+    
+        // Matrix-vector multiplication with Complex Non Linear operations
         let mut product: [u8; 32] = array_from_fn(|i| {
-            let mut sum1 = 0;
-            let mut sum2 = 0;
-            for (j, &elem) in vec.iter().enumerate() {
-                sum1 += self.0[2 * i][j] * (elem as u16);
-                sum2 += self.0[2 * i + 1][j] * (elem as u16);
+            let mut sum: f64 = 0.0;
+            for j in 0..64 {
+                let matrix_value = self.0[2 * i][j] as f64; // Assuming mat is a matrix of u8 or i32, convert to f64
+                let vec_value = vector[j];
+                let complex_value = complex_non_linear(vec_value);
+                sum += matrix_value * complex_value;
             }
-            ((sum1 >> 10) << 4) as u8 | (sum2 >> 10) as u8
+    
+            // Convert sum to 4 bits, combine back to 8 bits
+            let high = (sum % 16.0) as u8;
+            let low = ((sum / 16.0) % 16.0) as u8;
+            (high << 4) | low
         });
-
-        // Concatenate 4 LSBs back to 8 bit xor with sum1
-        product.iter_mut().zip(hash).for_each(|(p, h)| *p ^= h);
+    
+        // XOR with hash bytes
+        for (p, h) in product.iter_mut().zip(hash.iter()) {
+            *p ^= *h;
+        }
+    
+        // Hash again using HeavyHasher::hash function
         HeavyHasher::hash(Hash::from_le_bytes(product))
     }
 }
