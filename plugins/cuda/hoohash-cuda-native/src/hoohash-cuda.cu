@@ -32,7 +32,7 @@ __constant__ uint8_t hash_header[HASH_HEADER_SIZE];
 __constant__ uint256_t target;
 
 
-static void blake3(uint8_t* out, const uint8_t* in) {
+__device__ void blake3(uint8_t* out, const uint8_t* in) {
     Hasher hasher;
     hasher_new(&hasher);
     hasher_update(&hasher, in, 80);
