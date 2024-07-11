@@ -16,6 +16,7 @@ typedef union _uint256_t {
 #define HALF_MATRIX_SIZE 32
 #define QUARTER_MATRIX_SIZE 16
 #define HASH_HEADER_SIZE 72
+#define HASH_SIZE 32
 
 #define RANDOM_LEAN 0
 #define RANDOM_XOSHIRO 1

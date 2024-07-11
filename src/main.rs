@@ -32,7 +32,7 @@ mod watch;
 
 //remove the opencl plugin support for the moment
 //const WHITELIST: [&str; 4] = ["libhoohashcuda", "libhoohashopencl", "hoohashcuda", "hoohashopencl"];
-const WHITELIST: [&str; 2] = ["libhoohashcuda", "hoohashcuda"];
+const WHITELIST: [&str; 4] = ["libhoohashcuda", "hoohashcuda", "libhoohashopencl", "hoohashopencl"];
 
 pub mod proto {
     #![allow(clippy::derive_partial_eq_without_eq)]
