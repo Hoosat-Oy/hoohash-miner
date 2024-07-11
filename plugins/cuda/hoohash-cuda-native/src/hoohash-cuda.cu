@@ -133,15 +133,15 @@ extern "C" {
             memcpy(input, hash_header, HASH_HEADER_SIZE);
             memcpy(input + HASH_HEADER_SIZE, (uint8_t *)(&nonce), 8);
 
-            uint8_t hash[HASH_SIZE];
-            blake3(hash, input);
+            uint256_t result;
+            blake3(result.hash, input);
 
             uint8_t multiplied[HASH_SIZE];
             matrixMultiplication(hash, multiplied);
 
-            blake3(hash, multiplied);
+            blake3(result.hash, multiplied);
             
-            if (LT_U256(&hash, &target)) {
+            if (LT_U256(&result.hash, &target)) {
                 atomicCAS((unsigned long long int*)final_nonce, 0, (unsigned long long int)nonce);
             }
         }
