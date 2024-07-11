@@ -10,7 +10,7 @@ pub struct Opt {
     pub debug: bool,
     #[clap(short = 'a', long = "mining-address", help = "The HTN address for the miner reward")]
     pub mining_address: String,
-    #[clap(short = 's', long = "htnd-address", default_value = "127.0.0.1", help = "The IP of the HTND instance")]
+    #[clap(short = 's', long = "address", default_value = "127.0.0.1", help = "The stratum address prefixed stratum+tcp:// or HTND instance prefixed grpc:// [default: grpc://127.0.0.1]")]
     pub htnd_address: String,
 
     #[clap(long = "devfund-percent", help = "The percentage of blocks to send to the devfund (minimum 0%)", default_value = "0", parse(try_from_str = parse_devfund_percent))]

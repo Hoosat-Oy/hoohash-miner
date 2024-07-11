@@ -26,7 +26,7 @@ static VERSION_UPDATE: &str = "0.11.15";
 type BlockHandle = JoinHandle<Result<(), PollSendError<HoosatdMessage>>>;
 
 #[allow(dead_code)]
-pub struct hoohashHandler {
+pub struct HoohashHandler {
     client: RpcClient<TonicChannel>,
     pub send_channel: Sender<HoosatdMessage>,
     stream: Streaming<HoosatdMessage>,
@@ -41,7 +41,7 @@ pub struct hoohashHandler {
 }
 
 #[async_trait(?Send)]
-impl Client for hoohashHandler {
+impl Client for HoohashHandler {
     fn add_devfund(&mut self, address: String, percent: u16) {
         self.devfund_address = Some(address);
         self.devfund_percent = percent;
@@ -67,7 +67,7 @@ impl Client for hoohashHandler {
     }
 }
 
-impl hoohashHandler {
+impl HoohashHandler {
     pub async fn connect<D>(
         address: D,
         miner_address: String,
@@ -182,7 +182,7 @@ impl hoohashHandler {
     }
 }
 
-impl Drop for hoohashHandler {
+impl Drop for HoohashHandler {
     fn drop(&mut self) {
         self.block_handle.abort();
     }

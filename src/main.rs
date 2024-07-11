@@ -16,7 +16,7 @@ use std::thread::sleep;
 use std::time::Duration;
 
 use crate::cli::Opt;
-use crate::client::grpc::hoohashHandler;
+use crate::client::grpc::HoohashHandler;
 use crate::client::stratum::StratumHandler;
 use crate::client::Client;
 use crate::miner::MinerManager;
@@ -86,7 +86,7 @@ async fn get_client(
         )
         .await?)
     } else if htnd_address.starts_with("grpc://") {
-        Ok(hoohashHandler::connect(
+        Ok(HoohashHandler::connect(
             htnd_address.clone(),
             mining_address.clone(),
             mine_when_not_synced,

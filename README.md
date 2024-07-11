@@ -73,7 +73,7 @@ OPTIONS:
         --opencl-workload <OPENCL_WORKLOAD>                Ratio of nonces to GPU possible parrallel run in OpenCL [default: 512]
         --opencl-workload-absolute                         The values given by workload are not ratio, but absolute number of nonces in OpenCL [default: false]
     -p, --port <PORT>                                      HTND port [default: Mainnet = 42420, Testnet = 42422]
-    -s, --htnd-address <HTND_ADDRESS>                      The IP of the HTND instance [default: 127.0.0.1]
+    -s, --address <POOL_ADDRESS>                           The stratum address prefixed stratum+tcp:// or HTND instance prefixed grpc:// [default: grpc://127.0.0.1]
     -t, --threads <NUM_THREADS>                            Amount of CPU miner threads to launch [default: 0]
         --testnet                                          Use testnet instead of mainnet [default: false]
 ```
