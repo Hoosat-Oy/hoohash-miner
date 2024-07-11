@@ -49,7 +49,7 @@ ulong xoshiro256starstar_next(xoshiro256starstar_state *state) {
     return result;
 }
 
-static void blake3(uchar* out, const uchar* in) {
+__global__ void blake3(uchar* out, const uchar* in) {
     Hasher hasher;
     hasher_new(&hasher);
     hasher_update(&hasher, in, 80);
