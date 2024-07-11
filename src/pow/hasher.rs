@@ -4,10 +4,8 @@ use blake3::Hasher as Blake3Hasher;
 use crate::target::Uint256;
 
 const BLOCK_HASH_DOMAIN: &[u8] = b"BlockHash";
-const POW_HASH_DOMAIN: &[u8] = b"ProofOfWorkHash";
-const HEAVY_HASH_DOMAIN: &[u8] = b"HeavyHash";
 
-fn create_domain_key(domain: &[u8]) -> [u8; 32] {
+fn fixed_size_key(domain: &[u8]) -> [u8; 32] {
     let mut key = [0u8; 32];
     let len = std::cmp::min(domain.len(), 32);
     key[..len].copy_from_slice(&domain[..len]);
@@ -20,8 +18,7 @@ pub struct PowHasher(Blake3Hasher);
 impl PowHasher {
     #[inline(always)]
     pub fn new(pre_pow_hash: Hash, timestamp: u64) -> Self {
-        let key = create_domain_key(POW_HASH_DOMAIN);
-        let mut hasher = Blake3Hasher::new_keyed(&key);
+        let mut hasher = Blake3Hasher::new();
         hasher.update(&pre_pow_hash.to_le_bytes());
         hasher.update(&timestamp.to_le_bytes());
         PowHasher(hasher)
@@ -40,8 +37,7 @@ pub struct HeavyHasher;
 
 impl HeavyHasher {
     pub fn hash(in_hash: Hash) -> Uint256 {
-        let key = create_domain_key(HEAVY_HASH_DOMAIN);
-        let mut hasher = Blake3Hasher::new_keyed(&key);
+        let mut hasher = Blake3Hasher::new();
         hasher.update(&in_hash.to_le_bytes());
         Hash::from_le_bytes(*(hasher.finalize().as_bytes()))
     }
@@ -52,7 +48,7 @@ pub struct HeaderHasher(Blake3Hasher);
 
 impl HeaderHasher {
     pub fn new() -> Self {
-        let key = create_domain_key(BLOCK_HASH_DOMAIN);
+        let key = fixed_size_key(BLOCK_HASH_DOMAIN);
         HeaderHasher(Blake3Hasher::new_keyed(&key))
     }
 
