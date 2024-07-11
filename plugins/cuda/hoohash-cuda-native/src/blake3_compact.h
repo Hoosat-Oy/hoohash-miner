@@ -1,3 +1,6 @@
+#ifndef BLAKE3_COMPACT_H
+#define BLAKE3_COMPACT_H
+
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <stdint.h>
@@ -16,11 +19,11 @@
 #define DERIVE_KEY_CONTEXT (1 << 5)
 #define DERIVE_KEY_MATERIAL (1 << 6)
 
-__device__ const uint32_t IV[8] = {
+__device__ __constant__ uint32_t IV[8] = {
     0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A,
     0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19};
 
-__device__ const uint8_t MSG_PERMUTATION[16] = {
+__device__ __constant__ uint8_t MSG_PERMUTATION[16] = {
     2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8};
 
 __device__ void g(uint32_t *state, int a, int b, int c, int d, uint32_t mx, uint32_t my)
@@ -106,7 +109,7 @@ __device__ void words_from_little_endian_bytes(const uint8_t *bytes, uint32_t *w
     }
 }
 
-struct ChunkState
+typedef struct ChunkState
 {
     uint32_t chaining_value[8];
     uint64_t chunk_counter;
@@ -114,7 +117,7 @@ struct ChunkState
     uint8_t block_len;
     uint8_t blocks_compressed;
     uint32_t flags;
-};
+} ChunkState;
 
 __device__ void chunk_state_init(ChunkState *self, const uint32_t *key_words, uint64_t chunk_counter, uint32_t flags)
 {
@@ -162,14 +165,14 @@ __device__ void chunk_state_update(ChunkState *self, const uint8_t *input, size_
     }
 }
 
-struct Output
+typedef struct Output
 {
     uint32_t input_chaining_value[8];
     uint32_t block_words[16];
     uint64_t counter;
     uint32_t block_len;
     uint32_t flags;
-};
+} Output;
 
 __device__ void output_chaining_value(const Output *self, uint32_t *out)
 {
@@ -233,19 +236,19 @@ __device__ void parent_cv(
     uint32_t flags,
     uint32_t *out)
 {
-    Output parent_output;
-    parent_output(left_child_cv, right_child_cv, key_words, flags, &parent_output);
-    output_chaining_value(&parent_output, out);
+    Output parent_output_var;
+    parent_output(left_child_cv, right_child_cv, key_words, flags, &parent_output_var);
+    output_chaining_value(&parent_output_var, out);
 }
 
-struct Hasher
+typedef struct Hasher
 {
     ChunkState chunk_state;
     uint32_t key_words[8];
     uint32_t cv_stack[54][8];
     uint8_t cv_stack_len;
     uint32_t flags;
-};
+} Hasher;
 
 __device__ void hasher_init(Hasher *self, const uint32_t *key_words, uint32_t flags)
 {
@@ -267,7 +270,7 @@ __device__ void hasher_pop_stack(Hasher *self, uint32_t *out)
     memcpy(out, self->cv_stack[self->cv_stack_len], 8 * sizeof(uint32_t));
 }
 
-__device__ void hasher_add_chunk_chaining_value(Hasher *self, const uint32_t *new_cv, uint64_t total_chunks)
+__device__ void hasher_add_chunk_chaining_value(Hasher *self, uint32_t *new_cv, uint64_t total_chunks)
 {
     while ((total_chunks & 1) == 0)
     {
