@@ -1,693 +1,331 @@
-#pragma once
+#include <cuda_runtime.h>
+#include <device_launch_parameters.h>
+#include <stdint.h>
+#include <string.h>
 
-//@Credit - https://github.com/BLAKE3-team/BLAKE3/tree/master
+#define OUT_LEN 32
+#define KEY_LEN 32
+#define BLOCK_LEN 64
+#define CHUNK_LEN 1024
 
-#define INLINE __forceinline__
-
-#define BLAKE3_KEY_LEN 32
-#define BLAKE3_OUT_LEN 32
-#define BLAKE3_BLOCK_LEN 64
-#define BLAKE3_CHUNK_LEN 1024
-#define BLAKE3_MAX_DEPTH 54
-
-#define MAX_SIMD_DEGREE_OR_2 2
-
-__device__ unsigned int highest_one(uint64_t x)
-{
-    unsigned int c = 0;
-    if (x & 0xffffffff00000000ULL) { x >>= 32; c += 32; }
-    if (x & 0x00000000ffff0000ULL) { x >>= 16; c += 16; }
-    if (x & 0x000000000000ff00ULL) { x >>= 8; c += 8; }
-    if (x & 0x00000000000000f0ULL) { x >>= 4; c += 4; }
-    if (x & 0x000000000000000cULL) { x >>= 2; c += 2; }
-    if (x & 0x0000000000000002ULL) { c += 1; }
-    return c;
-}
-
-enum blake3_flags
-{
-    CHUNK_START = 1 << 0,
-    CHUNK_END = 1 << 1,
-    PARENT = 1 << 2,
-    ROOT = 1 << 3,
-    KEYED_HASH = 1 << 4,
-    DERIVE_KEY_CONTEXT = 1 << 5,
-    DERIVE_KEY_MATERIAL = 1 << 6,
-};
-
-__device__ unsigned int popcnt(uint64_t x)
-{
-    unsigned int count = 0;
-    while (x != 0) {
-        count += 1;
-        x &= x - 1;
-    }
-    return count;
-}
-
-__device__ uint64_t round_down_to_power_of_2(uint64_t x)
-{
-    return 1ULL << highest_one(x | 1);
-}
-
-__device__ uint32_t counter_low(uint64_t counter)
-{
-    return (uint32_t)counter;
-}
-
-__device__ uint32_t counter_high(uint64_t counter)
-{
-    return (uint32_t)(counter >> 32);
-}
-
-__device__ uint32_t load32(const void* src)
-{
-    const uint8_t* p = (const uint8_t*)src;
-    return ((uint32_t)(p[0]) << 0) | ((uint32_t)(p[1]) << 8) | ((uint32_t)(p[2]) << 16) |
-           ((uint32_t)(p[3]) << 24);
-}
-
-__device__ void load_key_words(const uint8_t key[BLAKE3_KEY_LEN], uint32_t key_words[8])
-{
-    key_words[0] = load32(&key[0 * 4]);
-    key_words[1] = load32(&key[1 * 4]);
-    key_words[2] = load32(&key[2 * 4]);
-    key_words[3] = load32(&key[3 * 4]);
-    key_words[4] = load32(&key[4 * 4]);
-    key_words[5] = load32(&key[5 * 4]);
-    key_words[6] = load32(&key[6 * 4]);
-    key_words[7] = load32(&key[7 * 4]);
-}
-
-__device__ void store32(void* dst, uint32_t w)
-{
-    uint8_t* p = (uint8_t*)dst;
-    p[0] = (uint8_t)(w >> 0);
-    p[1] = (uint8_t)(w >> 8);
-    p[2] = (uint8_t)(w >> 16);
-    p[3] = (uint8_t)(w >> 24);
-}
-
-__device__ void store_cv_words(uint8_t bytes_out[32], uint32_t cv_words[8])
-{
-    store32(&bytes_out[0 * 4], cv_words[0]);
-    store32(&bytes_out[1 * 4], cv_words[1]);
-    store32(&bytes_out[2 * 4], cv_words[2]);
-    store32(&bytes_out[3 * 4], cv_words[3]);
-    store32(&bytes_out[4 * 4], cv_words[4]);
-    store32(&bytes_out[5 * 4], cv_words[5]);
-    store32(&bytes_out[6 * 4], cv_words[6]);
-    store32(&bytes_out[7 * 4], cv_words[7]);
-}
+#define CHUNK_START (1 << 0)
+#define CHUNK_END (1 << 1)
+#define PARENT (1 << 2)
+#define ROOT (1 << 3)
+#define KEYED_HASH (1 << 4)
+#define DERIVE_KEY_CONTEXT (1 << 5)
+#define DERIVE_KEY_MATERIAL (1 << 6)
 
 __device__ const uint32_t IV[8] = {
-    0x6A09E667UL, 0xBB67AE85UL, 0x3C6EF372UL, 0xA54FF53AUL,
-    0x510E527FUL, 0x9B05688CUL, 0x1F83D9ABUL, 0x5BE0CD19UL
-};
+    0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A,
+    0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19};
 
-__device__ const uint8_t MSG_SCHEDULE[7][16] = {
-    {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
-    {2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8},
-    {3, 4, 10, 12, 13, 2, 7, 14, 6, 5, 9, 0, 11, 15, 8, 1},
-    {10, 7, 12, 9, 14, 3, 13, 15, 4, 0, 11, 2, 5, 8, 1, 6},
-    {12, 13, 9, 11, 15, 10, 14, 8, 7, 2, 5, 3, 0, 1, 6, 4},
-    {9, 14, 11, 5, 8, 12, 15, 1, 13, 3, 0, 10, 2, 6, 4, 7},
-    {11, 15, 5, 0, 1, 9, 8, 6, 14, 10, 2, 12, 3, 4, 7, 13},
-};
+__device__ const uint8_t MSG_PERMUTATION[16] = {
+    2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8};
 
-typedef struct
+__device__ void g(uint32_t *state, int a, int b, int c, int d, uint32_t mx, uint32_t my)
 {
-    uint32_t cv[8];
+    state[a] = state[a] + state[b] + mx;
+    state[d] = __funnelshift_r(state[d] ^ state[a], state[d] ^ state[a], 16);
+    state[c] = state[c] + state[d];
+    state[b] = __funnelshift_r(state[b] ^ state[c], state[b] ^ state[c], 12);
+    state[a] = state[a] + state[b] + my;
+    state[d] = __funnelshift_r(state[d] ^ state[a], state[d] ^ state[a], 8);
+    state[c] = state[c] + state[d];
+    state[b] = __funnelshift_r(state[b] ^ state[c], state[b] ^ state[c], 7);
+}
+
+__device__ void round(uint32_t *state, const uint32_t *m)
+{
+    g(state, 0, 4, 8, 12, m[0], m[1]);
+    g(state, 1, 5, 9, 13, m[2], m[3]);
+    g(state, 2, 6, 10, 14, m[4], m[5]);
+    g(state, 3, 7, 11, 15, m[6], m[7]);
+    g(state, 0, 5, 10, 15, m[8], m[9]);
+    g(state, 1, 6, 11, 12, m[10], m[11]);
+    g(state, 2, 7, 8, 13, m[12], m[13]);
+    g(state, 3, 4, 9, 14, m[14], m[15]);
+}
+
+__device__ void permute(uint32_t *m)
+{
+    uint32_t permuted[16];
+    for (int i = 0; i < 16; i++)
+    {
+        permuted[i] = m[MSG_PERMUTATION[i]];
+    }
+    memcpy(m, permuted, 16 * sizeof(uint32_t));
+}
+
+__device__ void compress(const uint32_t *chaining_value,
+                         const uint32_t *block_words,
+                         uint64_t counter,
+                         uint32_t block_len,
+                         uint32_t flags,
+                         uint32_t *out)
+{
+    uint32_t state[16] = {
+        chaining_value[0], chaining_value[1], chaining_value[2], chaining_value[3],
+        chaining_value[4], chaining_value[5], chaining_value[6], chaining_value[7],
+        IV[0], IV[1], IV[2], IV[3],
+        (uint32_t)counter, (uint32_t)(counter >> 32), block_len, flags};
+    uint32_t block[16];
+    memcpy(block, block_words, 16 * sizeof(uint32_t));
+
+    round(state, block); // round 1
+    permute(block);
+    round(state, block); // round 2
+    permute(block);
+    round(state, block); // round 3
+    permute(block);
+    round(state, block); // round 4
+    permute(block);
+    round(state, block); // round 5
+    permute(block);
+    round(state, block); // round 6
+    permute(block);
+    round(state, block); // round 7
+
+    for (int i = 0; i < 8; i++)
+    {
+        state[i] ^= state[i + 8];
+        state[i + 8] ^= chaining_value[i];
+    }
+
+    memcpy(out, state, 16 * sizeof(uint32_t));
+}
+
+__device__ void words_from_little_endian_bytes(const uint8_t *bytes, uint32_t *words, size_t words_len)
+{
+    for (size_t i = 0; i < words_len; i++)
+    {
+        words[i] = ((uint32_t)bytes[4 * i + 0] << 0) |
+                   ((uint32_t)bytes[4 * i + 1] << 8) |
+                   ((uint32_t)bytes[4 * i + 2] << 16) |
+                   ((uint32_t)bytes[4 * i + 3] << 24);
+    }
+}
+
+struct ChunkState
+{
+    uint32_t chaining_value[8];
     uint64_t chunk_counter;
-    uint8_t buf[BLAKE3_BLOCK_LEN];
-    uint8_t buf_len;
+    uint8_t block[BLOCK_LEN];
+    uint8_t block_len;
     uint8_t blocks_compressed;
-    uint8_t flags;
-} blake3_chunk_state;
+    uint32_t flags;
+};
 
-typedef struct
+__device__ void chunk_state_init(ChunkState *self, const uint32_t *key_words, uint64_t chunk_counter, uint32_t flags)
 {
-    uint32_t key[8];
-    blake3_chunk_state chunk;
-    uint8_t cv_stack_len;
-    uint8_t cv_stack[(BLAKE3_MAX_DEPTH + 1) * BLAKE3_OUT_LEN];
-} blake3_hasher;
-
-__device__ void chunk_state_init(blake3_chunk_state* self, const uint32_t key[8], uint8_t flags)
-{
-    memcpy(self->cv, key, BLAKE3_KEY_LEN);
-    self->chunk_counter = 0;
-    memset(self->buf, 0, BLAKE3_BLOCK_LEN);
-    self->buf_len = 0;
+    memcpy(self->chaining_value, key_words, 8 * sizeof(uint32_t));
+    self->chunk_counter = chunk_counter;
+    memset(self->block, 0, BLOCK_LEN);
+    self->block_len = 0;
     self->blocks_compressed = 0;
     self->flags = flags;
 }
 
-__device__ void chunk_state_reset(
-    blake3_chunk_state* self, const uint32_t key[8], uint64_t chunk_counter)
+__device__ size_t chunk_state_len(const ChunkState *self)
 {
-    memcpy(self->cv, key, BLAKE3_KEY_LEN);
-    self->chunk_counter = chunk_counter;
-    self->blocks_compressed = 0;
-    memset(self->buf, 0, BLAKE3_BLOCK_LEN);
-    self->buf_len = 0;
+    return BLOCK_LEN * self->blocks_compressed + self->block_len;
 }
 
-__device__ size_t chunk_state_len(const blake3_chunk_state* self)
+__device__ uint32_t chunk_state_start_flag(const ChunkState *self)
 {
-    return (BLAKE3_BLOCK_LEN * (size_t)self->blocks_compressed) + ((size_t)self->buf_len);
+    return self->blocks_compressed == 0 ? CHUNK_START : 0;
 }
 
-__device__ size_t chunk_state_fill_buf(
-    blake3_chunk_state* self, const uint8_t* input, size_t input_len)
+__device__ void chunk_state_update(ChunkState *self, const uint8_t *input, size_t input_len)
 {
-    size_t take = BLAKE3_BLOCK_LEN - ((size_t)self->buf_len);
-    if (take > input_len) {
-        take = input_len;
-    }
-    uint8_t* dest = self->buf + ((size_t)self->buf_len);
-    memcpy(dest, input, take);
-    self->buf_len += (uint8_t)take;
-    return take;
-}
-
-__device__ uint8_t chunk_state_maybe_start_flag(const blake3_chunk_state* self)
-{
-    if (self->blocks_compressed == 0) {
-        return CHUNK_START;
-    } else {
-        return 0;
-    }
-}
-
-typedef struct
-{
-    uint32_t input_cv[8];
-    uint64_t counter;
-    uint8_t block[BLAKE3_BLOCK_LEN];
-    uint8_t block_len;
-    uint8_t flags;
-} output_t;
-
-__device__ output_t make_output(const uint32_t input_cv[8], const uint8_t block[BLAKE3_BLOCK_LEN],
-    uint8_t block_len, uint64_t counter, uint8_t flags)
-{
-    output_t ret;
-    memcpy(ret.input_cv, input_cv, 32);
-    memcpy(ret.block, block, BLAKE3_BLOCK_LEN);
-    ret.block_len = block_len;
-    ret.counter = counter;
-    ret.flags = flags;
-    return ret;
-}
-
-__device__ uint32_t rotr32(uint32_t w, uint32_t c)
-{
-    return (w >> c) | (w << (32 - c));
-}
-
-__device__ void g(uint32_t* state, size_t a, size_t b, size_t c, size_t d, uint32_t x, uint32_t y)
-{
-    state[a] = state[a] + state[b] + x;
-    state[d] = rotr32(state[d] ^ state[a], 16);
-    state[c] = state[c] + state[d];
-    state[b] = rotr32(state[b] ^ state[c], 12);
-    state[a] = state[a] + state[b] + y;
-    state[d] = rotr32(state[d] ^ state[a], 8);
-    state[c] = state[c] + state[d];
-    state[b] = rotr32(state[b] ^ state[c], 7);
-}
-
-__device__ void round_fn(uint32_t state[16], const uint32_t* msg, size_t round)
-{
-    // Select the message schedule based on the round.
-    const uint8_t* schedule = MSG_SCHEDULE[round];
-
-    // Mix the columns.
-    g(state, 0, 4, 8, 12, msg[schedule[0]], msg[schedule[1]]);
-    g(state, 1, 5, 9, 13, msg[schedule[2]], msg[schedule[3]]);
-    g(state, 2, 6, 10, 14, msg[schedule[4]], msg[schedule[5]]);
-    g(state, 3, 7, 11, 15, msg[schedule[6]], msg[schedule[7]]);
-
-    // Mix the rows.
-    g(state, 0, 5, 10, 15, msg[schedule[8]], msg[schedule[9]]);
-    g(state, 1, 6, 11, 12, msg[schedule[10]], msg[schedule[11]]);
-    g(state, 2, 7, 8, 13, msg[schedule[12]], msg[schedule[13]]);
-    g(state, 3, 4, 9, 14, msg[schedule[14]], msg[schedule[15]]);
-}
-
-__device__ void compress_pre(uint32_t state[16], const uint32_t cv[8],
-    const uint8_t block[BLAKE3_BLOCK_LEN], uint8_t block_len, uint64_t counter, uint8_t flags)
-{
-    uint32_t block_words[16];
-    block_words[0] = load32(block + 4 * 0);
-    block_words[1] = load32(block + 4 * 1);
-    block_words[2] = load32(block + 4 * 2);
-    block_words[3] = load32(block + 4 * 3);
-    block_words[4] = load32(block + 4 * 4);
-    block_words[5] = load32(block + 4 * 5);
-    block_words[6] = load32(block + 4 * 6);
-    block_words[7] = load32(block + 4 * 7);
-    block_words[8] = load32(block + 4 * 8);
-    block_words[9] = load32(block + 4 * 9);
-    block_words[10] = load32(block + 4 * 10);
-    block_words[11] = load32(block + 4 * 11);
-    block_words[12] = load32(block + 4 * 12);
-    block_words[13] = load32(block + 4 * 13);
-    block_words[14] = load32(block + 4 * 14);
-    block_words[15] = load32(block + 4 * 15);
-
-    state[0] = cv[0];
-    state[1] = cv[1];
-    state[2] = cv[2];
-    state[3] = cv[3];
-    state[4] = cv[4];
-    state[5] = cv[5];
-    state[6] = cv[6];
-    state[7] = cv[7];
-    state[8] = IV[0];
-    state[9] = IV[1];
-    state[10] = IV[2];
-    state[11] = IV[3];
-    state[12] = counter_low(counter);
-    state[13] = counter_high(counter);
-    state[14] = (uint32_t)block_len;
-    state[15] = (uint32_t)flags;
-
-    round_fn(state, &block_words[0], 0);
-    round_fn(state, &block_words[0], 1);
-    round_fn(state, &block_words[0], 2);
-    round_fn(state, &block_words[0], 3);
-    round_fn(state, &block_words[0], 4);
-    round_fn(state, &block_words[0], 5);
-    round_fn(state, &block_words[0], 6);
-}
-
-__device__ void blake3_compress_in_place_portable(uint32_t cv[8],
-    const uint8_t block[BLAKE3_BLOCK_LEN], uint8_t block_len, uint64_t counter, uint8_t flags)
-{
-    uint32_t state[16];
-    compress_pre(state, cv, block, block_len, counter, flags);
-    cv[0] = state[0] ^ state[8];
-    cv[1] = state[1] ^ state[9];
-    cv[2] = state[2] ^ state[10];
-    cv[3] = state[3] ^ state[11];
-    cv[4] = state[4] ^ state[12];
-    cv[5] = state[5] ^ state[13];
-    cv[6] = state[6] ^ state[14];
-    cv[7] = state[7] ^ state[15];
-}
-
-__device__ void blake3_compress_in_place(uint32_t cv[8], const uint8_t block[BLAKE3_BLOCK_LEN],
-    uint8_t block_len, uint64_t counter, uint8_t flags)
-{
-    blake3_compress_in_place_portable(cv, block, block_len, counter, flags);
-}
-
-__device__ void output_chaining_value(const output_t* self, uint8_t cv[32])
-{
-    uint32_t cv_words[8];
-    memcpy(cv_words, self->input_cv, 32);
-    blake3_compress_in_place(cv_words, self->block, self->block_len, self->counter, self->flags);
-    store_cv_words(cv, cv_words);
-}
-
-__device__ void blake3_compress_xof(const uint32_t cv[8], const uint8_t block[BLAKE3_BLOCK_LEN],
-    uint8_t block_len, uint64_t counter, uint8_t flags, uint8_t out[64])
-{
-    uint32_t state[16];
-    compress_pre(state, cv, block, block_len, counter, flags);
-
-    store32(&out[0 * 4], state[0] ^ state[8]);
-    store32(&out[1 * 4], state[1] ^ state[9]);
-    store32(&out[2 * 4], state[2] ^ state[10]);
-    store32(&out[3 * 4], state[3] ^ state[11]);
-    store32(&out[4 * 4], state[4] ^ state[12]);
-    store32(&out[5 * 4], state[5] ^ state[13]);
-    store32(&out[6 * 4], state[6] ^ state[14]);
-    store32(&out[7 * 4], state[7] ^ state[15]);
-    store32(&out[8 * 4], state[8] ^ cv[0]);
-    store32(&out[9 * 4], state[9] ^ cv[1]);
-    store32(&out[10 * 4], state[10] ^ cv[2]);
-    store32(&out[11 * 4], state[11] ^ cv[3]);
-    store32(&out[12 * 4], state[12] ^ cv[4]);
-    store32(&out[13 * 4], state[13] ^ cv[5]);
-    store32(&out[14 * 4], state[14] ^ cv[6]);
-    store32(&out[15 * 4], state[15] ^ cv[7]);
-}
-
-__device__ void hash_one(const uint8_t* input, size_t blocks, const uint32_t key[8],
-    uint64_t counter, uint8_t flags, uint8_t flags_start, uint8_t flags_end,
-    uint8_t out[BLAKE3_OUT_LEN])
-{
-    uint32_t cv[8];
-    memcpy(cv, key, BLAKE3_KEY_LEN);
-    uint8_t block_flags = flags | flags_start;
-    while (blocks > 0) {
-        if (blocks == 1) {
-            block_flags |= flags_end;
+    while (input_len > 0)
+    {
+        if (self->block_len == BLOCK_LEN)
+        {
+            uint32_t block_words[16];
+            words_from_little_endian_bytes(self->block, block_words, 16);
+            uint32_t out[16];
+            compress(self->chaining_value, block_words, self->chunk_counter,
+                     BLOCK_LEN, self->flags | chunk_state_start_flag(self), out);
+            memcpy(self->chaining_value, out, 8 * sizeof(uint32_t));
+            self->blocks_compressed++;
+            memset(self->block, 0, BLOCK_LEN);
+            self->block_len = 0;
         }
-        blake3_compress_in_place_portable(cv, input, BLAKE3_BLOCK_LEN, counter, block_flags);
-        input = &input[BLAKE3_BLOCK_LEN];
-        blocks -= 1;
-        block_flags = flags;
-    }
-    store_cv_words(out, cv);
-}
 
-__device__ void blake3_hash_many(const uint8_t* const* inputs, size_t num_inputs, size_t blocks,
-    const uint32_t key[8], uint64_t counter, bool increment_counter, uint8_t flags,
-    uint8_t flags_start, uint8_t flags_end, uint8_t* out)
-{
-    while (num_inputs > 0) {
-        hash_one(inputs[0], blocks, key, counter, flags, flags_start, flags_end, out);
-        if (increment_counter) {
-            counter += 1;
-        }
-        inputs += 1;
-        num_inputs -= 1;
-        out = &out[BLAKE3_OUT_LEN];
-    }
-}
-
-__device__ void output_root_bytes(const output_t* self, uint64_t seek, uint8_t* out, size_t out_len)
-{
-    uint64_t output_block_counter = seek / 64;
-    size_t offset_within_block = seek % 64;
-    uint8_t wide_buf[64];
-    while (out_len > 0) {
-        blake3_compress_xof(self->input_cv, self->block, self->block_len, output_block_counter,
-            self->flags | ROOT, wide_buf);
-        size_t available_bytes = 64 - offset_within_block;
-        size_t memcpy_len;
-        if (out_len > available_bytes) {
-            memcpy_len = available_bytes;
-        } else {
-            memcpy_len = out_len;
-        }
-        memcpy(out, wide_buf + offset_within_block, memcpy_len);
-        out += memcpy_len;
-        out_len -= memcpy_len;
-        output_block_counter += 1;
-        offset_within_block = 0;
-    }
-}
-
-__device__ void chunk_state_update(blake3_chunk_state* self, const uint8_t* input, size_t input_len)
-{
-    if (self->buf_len > 0) {
-        size_t take = chunk_state_fill_buf(self, input, input_len);
+        size_t want = BLOCK_LEN - self->block_len;
+        size_t take = (want < input_len) ? want : input_len;
+        memcpy(self->block + self->block_len, input, take);
+        self->block_len += take;
         input += take;
         input_len -= take;
-        if (input_len > 0) {
-            blake3_compress_in_place(self->cv, self->buf, BLAKE3_BLOCK_LEN, self->chunk_counter,
-                self->flags | chunk_state_maybe_start_flag(self));
-            self->blocks_compressed += 1;
-            self->buf_len = 0;
-            memset(self->buf, 0, BLAKE3_BLOCK_LEN);
+    }
+}
+
+struct Output
+{
+    uint32_t input_chaining_value[8];
+    uint32_t block_words[16];
+    uint64_t counter;
+    uint32_t block_len;
+    uint32_t flags;
+};
+
+__device__ void output_chaining_value(const Output *self, uint32_t *out)
+{
+    uint32_t out_block[16];
+    compress(self->input_chaining_value, self->block_words, self->counter,
+             self->block_len, self->flags, out_block);
+    memcpy(out, out_block, 8 * sizeof(uint32_t));
+}
+
+__device__ void output_root_bytes(const Output *self, uint8_t *out, size_t out_len)
+{
+    uint64_t output_block_counter = 0;
+    while (out_len > 0)
+    {
+        uint32_t words[16];
+        compress(self->input_chaining_value, self->block_words, output_block_counter,
+                 self->block_len, self->flags | ROOT, words);
+        for (size_t word = 0; word < 16 && out_len > 0; word++)
+        {
+            for (size_t byte = 0; byte < 4 && out_len > 0; byte++)
+            {
+                *out = (uint8_t)(words[word] >> (8 * byte));
+                out++;
+                out_len--;
+            }
         }
-    }
-
-    while (input_len > BLAKE3_BLOCK_LEN) {
-        blake3_compress_in_place(self->cv, input, BLAKE3_BLOCK_LEN, self->chunk_counter,
-            self->flags | chunk_state_maybe_start_flag(self));
-        self->blocks_compressed += 1;
-        input += BLAKE3_BLOCK_LEN;
-        input_len -= BLAKE3_BLOCK_LEN;
-    }
-
-    size_t take = chunk_state_fill_buf(self, input, input_len);
-    input += take;
-    input_len -= take;
-}
-
-__device__ output_t chunk_state_output(const blake3_chunk_state* self)
-{
-    uint8_t block_flags = self->flags | chunk_state_maybe_start_flag(self) | CHUNK_END;
-    return make_output(self->cv, self->buf, self->buf_len, self->chunk_counter, block_flags);
-}
-
-__device__ output_t parent_output(
-    const uint8_t block[BLAKE3_BLOCK_LEN], const uint32_t key[8], uint8_t flags)
-{
-    return make_output(key, block, BLAKE3_BLOCK_LEN, 0, flags | PARENT);
-}
-
-__device__ size_t left_len(size_t content_len)
-{
-    size_t full_chunks = (content_len - 1) / BLAKE3_CHUNK_LEN;
-    return round_down_to_power_of_2(full_chunks) * BLAKE3_CHUNK_LEN;
-}
-
-__device__ size_t compress_chunks_parallel(const uint8_t* input, size_t input_len,
-    const uint32_t key[8], uint64_t chunk_counter, uint8_t flags, uint8_t* out)
-{
-    const uint8_t* chunks_array[1];
-
-    size_t input_position = 0;
-    size_t chunks_array_len = 0;
-    while (input_len - input_position >= BLAKE3_CHUNK_LEN) {
-        chunks_array[chunks_array_len] = &input[input_position];
-        input_position += BLAKE3_CHUNK_LEN;
-        chunks_array_len += 1;
-    }
-
-    blake3_hash_many(chunks_array, chunks_array_len, BLAKE3_CHUNK_LEN / BLAKE3_BLOCK_LEN, key,
-        chunk_counter, true, flags, CHUNK_START, CHUNK_END, out);
-
-
-    if (input_len > input_position) {
-        uint64_t counter = chunk_counter + (uint64_t)chunks_array_len;
-        blake3_chunk_state chunk_state;
-        chunk_state_init(&chunk_state, key, flags);
-        chunk_state.chunk_counter = counter;
-        chunk_state_update(&chunk_state, &input[input_position], input_len - input_position);
-        output_t output = chunk_state_output(&chunk_state);
-        output_chaining_value(&output, &out[chunks_array_len * BLAKE3_OUT_LEN]);
-        return chunks_array_len + 1;
-    } else {
-        return chunks_array_len;
+        output_block_counter++;
     }
 }
 
-__device__ size_t compress_parents_parallel(const uint8_t* child_chaining_values,
-    size_t num_chaining_values, const uint32_t key[8], uint8_t flags, uint8_t* out)
+__device__ void chunk_state_output(const ChunkState *self, Output *out)
 {
-    const uint8_t* parents_array[MAX_SIMD_DEGREE_OR_2];
-    size_t parents_array_len = 0;
-    while (num_chaining_values - (2 * parents_array_len) >= 2) {
-        parents_array[parents_array_len] =
-            &child_chaining_values[2 * parents_array_len * BLAKE3_OUT_LEN];
-        parents_array_len += 1;
-    }
-
-    blake3_hash_many(parents_array, parents_array_len, 1, key,
-        0,  // Parents always use counter 0.
-        false, flags | PARENT,
-        0,  // Parents have no start flags.
-        0,  // Parents have no end flags.
-        out);
-
-    // If there's an odd child left over, it becomes an output.
-    if (num_chaining_values > 2 * parents_array_len) {
-        memcpy(&out[parents_array_len * BLAKE3_OUT_LEN],
-            &child_chaining_values[2 * parents_array_len * BLAKE3_OUT_LEN], BLAKE3_OUT_LEN);
-        return parents_array_len + 1;
-    } else {
-        return parents_array_len;
-    }
+    uint32_t block_words[16];
+    words_from_little_endian_bytes(self->block, block_words, 16);
+    memcpy(out->input_chaining_value, self->chaining_value, 8 * sizeof(uint32_t));
+    memcpy(out->block_words, block_words, 16 * sizeof(uint32_t));
+    out->counter = self->chunk_counter;
+    out->block_len = self->block_len;
+    out->flags = self->flags | chunk_state_start_flag(self) | CHUNK_END;
 }
 
-__device__ static size_t blake3_compress_subtree_wide(const uint8_t* input, size_t input_len,
-    const uint32_t key[8], uint64_t chunk_counter, uint8_t flags, uint8_t* out)
+__device__ void parent_output(
+    const uint32_t *left_child_cv,
+    const uint32_t *right_child_cv,
+    const uint32_t *key_words,
+    uint32_t flags,
+    Output *out)
 {
-    if (input_len <= 1 * BLAKE3_CHUNK_LEN) {
-        return compress_chunks_parallel(input, input_len, key, chunk_counter, flags, out);
-    }
-    size_t left_input_len = left_len(input_len);
-    size_t right_input_len = input_len - left_input_len;
-    const uint8_t* right_input = &input[left_input_len];
-    uint64_t right_chunk_counter = chunk_counter + (uint64_t)(left_input_len / BLAKE3_CHUNK_LEN);
-
-    uint8_t cv_array[2 * MAX_SIMD_DEGREE_OR_2 * BLAKE3_OUT_LEN];
-    size_t degree = 1;  // todo they hard coded to 1??
-    if (left_input_len > BLAKE3_CHUNK_LEN && degree == 1) {
-        degree = 2;
-    }
-    uint8_t* right_cvs = &cv_array[degree * BLAKE3_OUT_LEN];
-
-    size_t left_n =
-        blake3_compress_subtree_wide(input, left_input_len, key, chunk_counter, flags, cv_array);
-    size_t right_n = blake3_compress_subtree_wide(
-        right_input, right_input_len, key, right_chunk_counter, flags, right_cvs);
-
-    if (left_n == 1) {
-        memcpy(out, cv_array, 2 * BLAKE3_OUT_LEN);
-        return 2;
-    }
-
-    // Otherwise, do one layer of parent node compression.
-    size_t num_chaining_values = left_n + right_n;
-    return compress_parents_parallel(cv_array, num_chaining_values, key, flags, out);
+    memcpy(out->input_chaining_value, key_words, 8 * sizeof(uint32_t));
+    memcpy(out->block_words, left_child_cv, 8 * sizeof(uint32_t));
+    memcpy(out->block_words + 8, right_child_cv, 8 * sizeof(uint32_t));
+    out->counter = 0;
+    out->block_len = BLOCK_LEN;
+    out->flags = PARENT | flags;
 }
 
-__device__ void compress_subtree_to_parent_node(const uint8_t* input, size_t input_len,
-    const uint32_t key[8], uint64_t chunk_counter, uint8_t flags, uint8_t out[2 * BLAKE3_OUT_LEN])
+__device__ void parent_cv(
+    const uint32_t *left_child_cv,
+    const uint32_t *right_child_cv,
+    const uint32_t *key_words,
+    uint32_t flags,
+    uint32_t *out)
 {
-    uint8_t cv_array[MAX_SIMD_DEGREE_OR_2 * BLAKE3_OUT_LEN];
-    size_t num_cvs =
-        blake3_compress_subtree_wide(input, input_len, key, chunk_counter, flags, cv_array);
-
-    uint8_t out_array[MAX_SIMD_DEGREE_OR_2 * BLAKE3_OUT_LEN / 2];
-
-    while (num_cvs > 2 && num_cvs <= MAX_SIMD_DEGREE_OR_2) {
-        num_cvs = compress_parents_parallel(cv_array, num_cvs, key, flags, out_array);
-        memcpy(cv_array, out_array, num_cvs * BLAKE3_OUT_LEN);
-    }
-    memcpy(out, cv_array, 2 * BLAKE3_OUT_LEN);
+    Output parent_output;
+    parent_output(left_child_cv, right_child_cv, key_words, flags, &parent_output);
+    output_chaining_value(&parent_output, out);
 }
 
-__device__ void hasher_init_base(blake3_hasher* self, const uint32_t key[8], uint8_t flags)
+struct Hasher
 {
-    memcpy(self->key, key, BLAKE3_KEY_LEN);
-    chunk_state_init(&self->chunk, key, flags);
-    self->cv_stack_len = 0;
-}
-
-__device__ void blake3_hasher_init(blake3_hasher* self)
-{
-    hasher_init_base(self, IV, 0);
-}
-
-__device__ void blake3_hasher_init_keyed(blake3_hasher* self, const uint8_t key[BLAKE3_KEY_LEN])
-{
+    ChunkState chunk_state;
     uint32_t key_words[8];
-    load_key_words(key, key_words);
-    hasher_init_base(self, key_words, KEYED_HASH);
-}
+    uint32_t cv_stack[54][8];
+    uint8_t cv_stack_len;
+    uint32_t flags;
+};
 
-__device__ void hasher_merge_cv_stack(blake3_hasher* self, uint64_t total_len)
+__device__ void hasher_init(Hasher *self, const uint32_t *key_words, uint32_t flags)
 {
-    size_t post_merge_stack_len = (size_t)popcnt(total_len);
-    while (self->cv_stack_len > post_merge_stack_len) {
-        uint8_t* parent_node = &self->cv_stack[(self->cv_stack_len - 2) * BLAKE3_OUT_LEN];
-        output_t output = parent_output(parent_node, self->key, self->chunk.flags);
-        output_chaining_value(&output, parent_node);
-        self->cv_stack_len -= 1;
-    }
-}
-
-__device__ void hasher_push_cv(
-    blake3_hasher* self, uint8_t new_cv[BLAKE3_OUT_LEN], uint64_t chunk_counter)
-{
-    hasher_merge_cv_stack(self, chunk_counter);
-    memcpy(&self->cv_stack[self->cv_stack_len * BLAKE3_OUT_LEN], new_cv, BLAKE3_OUT_LEN);
-    self->cv_stack_len += 1;
-}
-
-__device__ void blake3_hasher_update(blake3_hasher* self, const void* input, size_t input_len)
-{
-    if (input_len == 0) {
-        return;
-    }
-
-    const uint8_t* input_bytes = (const uint8_t*)input;
-
-    if (chunk_state_len(&self->chunk) > 0) {
-        size_t take = BLAKE3_CHUNK_LEN - chunk_state_len(&self->chunk);
-        if (take > input_len) {
-            take = input_len;
-        }
-        chunk_state_update(&self->chunk, input_bytes, take);
-        input_bytes += take;
-        input_len -= take;
-
-        if (input_len > 0) {
-            output_t output = chunk_state_output(&self->chunk);
-            uint8_t chunk_cv[32];
-            output_chaining_value(&output, chunk_cv);
-            hasher_push_cv(self, chunk_cv, self->chunk.chunk_counter);
-            chunk_state_reset(&self->chunk, self->key, self->chunk.chunk_counter + 1);
-        } else {
-            return;
-        }
-    }
-
-    while (input_len > BLAKE3_CHUNK_LEN) {
-        size_t subtree_len = round_down_to_power_of_2(input_len);
-        uint64_t count_so_far = self->chunk.chunk_counter * BLAKE3_CHUNK_LEN;
-
-        while ((((uint64_t)(subtree_len - 1)) & count_so_far) != 0) {
-            subtree_len /= 2;
-        }
-
-        uint64_t subtree_chunks = subtree_len / BLAKE3_CHUNK_LEN;
-        if (subtree_len <= BLAKE3_CHUNK_LEN) {
-            blake3_chunk_state chunk_state;
-            chunk_state_init(&chunk_state, self->key, self->chunk.flags);
-            chunk_state.chunk_counter = self->chunk.chunk_counter;
-            chunk_state_update(&chunk_state, input_bytes, subtree_len);
-            output_t output = chunk_state_output(&chunk_state);
-            uint8_t cv[BLAKE3_OUT_LEN];
-            output_chaining_value(&output, cv);
-            hasher_push_cv(self, cv, chunk_state.chunk_counter);
-        } else {
-            uint8_t cv_pair[2 * BLAKE3_OUT_LEN];
-            compress_subtree_to_parent_node(input_bytes, subtree_len, self->key,
-                self->chunk.chunk_counter, self->chunk.flags, cv_pair);
-            hasher_push_cv(self, cv_pair, self->chunk.chunk_counter);
-            hasher_push_cv(
-                self, &cv_pair[BLAKE3_OUT_LEN], self->chunk.chunk_counter + (subtree_chunks / 2));
-        }
-        self->chunk.chunk_counter += subtree_chunks;
-        input_bytes += subtree_len;
-        input_len -= subtree_len;
-    }
-
-    if (input_len > 0) {
-        chunk_state_update(&self->chunk, input_bytes, input_len);
-        hasher_merge_cv_stack(self, self->chunk.chunk_counter);
-    }
-}
-
-__device__ void blake3_hasher_finalize_seek(
-    const blake3_hasher* self, uint64_t seek, uint8_t* out, size_t out_len)
-{
-    if (out_len == 0) {
-        return;
-    }
-
-    if (self->cv_stack_len == 0) {
-        output_t output = chunk_state_output(&self->chunk);
-        output_root_bytes(&output, seek, out, out_len);
-        return;
-    }
-    output_t output;
-    size_t cvs_remaining;
-    if (chunk_state_len(&self->chunk) > 0) {
-        cvs_remaining = self->cv_stack_len;
-        output = chunk_state_output(&self->chunk);
-    } else {
-        cvs_remaining = self->cv_stack_len - 2;
-        output = parent_output(&self->cv_stack[cvs_remaining * 32], self->key, self->chunk.flags);
-    }
-    while (cvs_remaining > 0) {
-        cvs_remaining -= 1;
-        uint8_t parent_block[BLAKE3_BLOCK_LEN];
-        memcpy(parent_block, &self->cv_stack[cvs_remaining * 32], 32);
-        output_chaining_value(&output, &parent_block[32]);
-        output = parent_output(parent_block, self->key, self->chunk.flags);
-    }
-    output_root_bytes(&output, seek, out, out_len);
-}
-
-__device__ void blake3_hasher_finalize(const blake3_hasher* self, uint8_t* out, size_t out_len)
-{
-    blake3_hasher_finalize_seek(self, 0, out, out_len);
-}
-
-__device__ void blake3_hasher_reset(blake3_hasher* self)
-{
-    chunk_state_reset(&self->chunk, self->key, 0);
+    chunk_state_init(&self->chunk_state, key_words, 0, flags);
+    memcpy(self->key_words, key_words, 8 * sizeof(uint32_t));
     self->cv_stack_len = 0;
+    self->flags = flags;
+}
+
+__device__ void hasher_push_stack(Hasher *self, const uint32_t *cv)
+{
+    memcpy(self->cv_stack[self->cv_stack_len], cv, 8 * sizeof(uint32_t));
+    self->cv_stack_len++;
+}
+
+__device__ void hasher_pop_stack(Hasher *self, uint32_t *out)
+{
+    self->cv_stack_len--;
+    memcpy(out, self->cv_stack[self->cv_stack_len], 8 * sizeof(uint32_t));
+}
+
+__device__ void hasher_add_chunk_chaining_value(Hasher *self, const uint32_t *new_cv, uint64_t total_chunks)
+{
+    while ((total_chunks & 1) == 0)
+    {
+        uint32_t parent_node[8];
+        hasher_pop_stack(self, parent_node);
+        parent_cv(parent_node, new_cv, self->key_words, self->flags, new_cv);
+        total_chunks >>= 1;
+    }
+    hasher_push_stack(self, new_cv);
+}
+
+__device__ void hasher_update(Hasher *self, const uint8_t *input, size_t input_len)
+{
+    while (input_len > 0)
+    {
+        if (chunk_state_len(&self->chunk_state) == CHUNK_LEN)
+        {
+            uint32_t chunk_cv[8];
+            Output output;
+            chunk_state_output(&self->chunk_state, &output);
+            output_chaining_value(&output, chunk_cv);
+            uint64_t total_chunks = self->chunk_state.chunk_counter + 1;
+            hasher_add_chunk_chaining_value(self, chunk_cv, total_chunks);
+            chunk_state_init(&self->chunk_state, self->key_words, total_chunks, self->flags);
+        }
+
+        size_t want = CHUNK_LEN - chunk_state_len(&self->chunk_state);
+        size_t take = (want < input_len) ? want : input_len;
+        chunk_state_update(&self->chunk_state, input, take);
+        input += take;
+        input_len -= take;
+    }
+}
+
+__device__ void hasher_finalize(const Hasher *self, uint8_t *out, size_t out_len)
+{
+    Output output;
+    chunk_state_output(&self->chunk_state, &output);
+
+    size_t parent_nodes_remaining = self->cv_stack_len;
+    while (parent_nodes_remaining > 0)
+    {
+        parent_nodes_remaining--;
+        parent_output(
+            self->cv_stack[parent_nodes_remaining],
+            output.input_chaining_value,
+            self->key_words,
+            self->flags,
+            &output);
+    }
+
+    output_root_bytes(&output, out, out_len);
+}
+
+__device__ static void blake3(uint8_t *out, const uint8_t *in)
+{
+    Hasher hasher;
+    hasher_init(&hasher, IV, 0);
+    hasher_update(&hasher, input, input_len);
+    hasher_finalize(&hasher, output, output_len);
 }
