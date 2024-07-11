@@ -249,7 +249,7 @@ typedef struct Hasher
     uint32_t flags;
 } Hasher;
 
-__device__ void hasher_init(Hasher *self, const uint32_t *key_words, uint32_t flags)
+__device__ void hasher_init(Hasher *self, const uint32_t *key_words, uint8_t flags)
 {
     chunk_state_init(&self->chunk_state, key_words, 0, flags);
     memcpy(self->key_words, key_words, 8 * sizeof(uint32_t));
