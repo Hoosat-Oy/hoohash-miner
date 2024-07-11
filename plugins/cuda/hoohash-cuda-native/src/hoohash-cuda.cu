@@ -1,5 +1,6 @@
 #include <stdint.h>
-#include <assert.h>
+#include <string.h>
+#include <cuda_runtime.h>
 #include "keccak-tiny.c"
 #include "xoshiro256starstar.c"
 #include "blake3_compact.h" 
@@ -30,7 +31,7 @@ __constant__ uint8_t hash_header[HASH_HEADER_SIZE];
 __constant__ uint256_t target;
 
 
-static void blake3(uchar* out, const uchar* in) {
+static void blake3(uint8_t* out, const uint8_t* in) {
     Hasher hasher;
     hasher_new(&hasher);
     hasher_update(&hasher, in, 80);
@@ -111,7 +112,6 @@ __device__ void matrixMultiplication(const uint8_t* hash, uint8_t* result) {
     }
 }
 
-
 extern "C" {
     __global__ void heavy_hash(const uint64_t nonce_mask, const uint64_t nonce_fixed, const uint64_t nonces_len, uint8_t random_type, void* states, uint64_t *final_nonce) {
         int nonceId = threadIdx.x + blockIdx.x * blockDim.x;
@@ -130,21 +130,19 @@ extern "C" {
             nonce = (nonce & nonce_mask) | nonce_fixed;
 
             uint256_t result;
-            // Confirm that hash_header is 72 bytes long
-            // PRE_POW_HASH | TIME | 32 byte empty | nonce = first data to be hashed.
-            // add nonce to the headerhash by making it input, making it 80 bytes.
             uint8_t input[80];
             memcpy(input, hash_header, HASH_HEADER_SIZE);
             memcpy(input + HASH_HEADER_SIZE, (uint8_t *)(&nonce), 8);
 
             uint8_t hash[HASH_SIZE];
-            blake3(result.hash, input);
+            blake3(hash, input);
 
             uint8_t multiplied[HASH_SIZE];
             matrixMultiplication(hash, multiplied);
 
-            blake3(result.hash, multiplied);
-
+            blake3(hash, multiplied);
+            result.hash = hash;
+            
             if (LT_U256(&result, &target)) {
                 atomicCAS((unsigned long long int*)final_nonce, 0, (unsigned long long int)nonce);
             }
