@@ -24,7 +24,8 @@ typedef union _uint256_t {
 #define RANDOM_LEAN 0
 #define RANDOM_XOSHIRO 1
 
-#define LT_U256(X,Y) ((X).number[3] != (Y)->number[3] ? (X).number[3] < (Y)->number[3] : (X).number[2] != (Y)->number[2] ? (X).number[2] < (Y)->number[2] : (X).number[1] != (Y)->number[1] ? (X).number[1] < (Y)->number[1] : (X).number[0] < (Y)->number[0])
+#define LT_U256(X,Y) ((X)->number[3] != (Y)->number[3] ? (X)->number[3] < (Y)->number[3] : (X)->number[2] != (Y)->number[2] ? (X)->number[2] < (Y)->number[2] : (X)->number[1] != (Y)->number[1] ? (X)->number[1] < (Y)->number[1] : (X)->number[0] < (Y)->number[0])
+
 
 __constant__ uint8_t matrix[MATRIX_SIZE][MATRIX_SIZE];
 __constant__ uint8_t hash_header[HASH_HEADER_SIZE];
