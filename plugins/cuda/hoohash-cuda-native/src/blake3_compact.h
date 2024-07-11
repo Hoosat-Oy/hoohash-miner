@@ -257,6 +257,28 @@ __device__ void hasher_init(Hasher *self, const uint32_t *key_words, uint32_t fl
     self->flags = flags;
 }
 
+__device__ void hasher_new_internal(Hasher *self, const uint *key_words, uint flags)
+{
+    hasher_init(self, key_words, flags);
+}
+
+__device__ void hasher_new(Hasher *self)
+{
+    uint iv_copy[8];
+    for (int i = 0; i < 8; i++)
+    {
+        iv_copy[i] = IV[i];
+    }
+    hasher_new_internal(self, iv_copy, 0);
+}
+
+__device__ void hasher_new_keyed(Hasher *self, const uchar key[KEY_LEN])
+{
+    uint key_words[8];
+    words_from_little_endian_bytes(key, key_words, 8);
+    hasher_new_internal(self, key_words, KEYED_HASH);
+}
+
 __device__ void hasher_push_stack(Hasher *self, const uint32_t *cv)
 {
     memcpy(self->cv_stack[self->cv_stack_len], cv, 8 * sizeof(uint32_t));
