@@ -138,11 +138,11 @@ extern "C" {
             blake3(result.hash, input);
 
             uint8_t multiplied[HASH_SIZE];
-            matrixMultiplication(hash, multiplied);
+            matrixMultiplication(result.hash, multiplied);
 
             blake3(result.hash, multiplied);
             
-            if (LT_U256(&result.hash, &target)) {
+            if (LT_U256(&result, &target)) {
                 atomicCAS((unsigned long long int*)final_nonce, 0, (unsigned long long int)nonce);
             }
         }

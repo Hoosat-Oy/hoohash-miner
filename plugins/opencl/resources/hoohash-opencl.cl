@@ -159,11 +159,11 @@ __kernel void heavy_hash(const ulong nonce_mask, const ulong nonce_fixed, const 
         blake3(result.hash, input);
 
         uchar multiplied[HASH_SIZE];
-        matrixMultiplication(matrix, hash, multiplied);
+        matrixMultiplication(matrix, result.hash, multiplied);
 
         blake3(result.hash, multiplied);
 
-        if (LT_U256(&hash, target)) {
+        if (LT_U256(&result, target)) {
             atom_cmpxchg((volatile __global ulong*)final_nonce, 0, nonce);
         }
     }
