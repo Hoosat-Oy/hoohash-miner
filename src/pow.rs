@@ -17,7 +17,6 @@ use hoohash_miner::Worker;
 
 mod hasher;
 mod heavy_hash;
-mod keccak;
 mod xoshiro;
 
 #[derive(Clone, Debug)]
